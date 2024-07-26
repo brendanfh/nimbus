@@ -2,6 +2,7 @@
 
 use nimbus {*}
 use core.encoding.json
+use core {tprintf}
 
 index :: c => {
     c->json(200, &.{
@@ -14,11 +15,15 @@ other :: (c: Context) {
     c->file(200, "text/plain", "./tests/demo.onyx")
 }
 
+@route.{.get, "/test/:urlp"}
+(c: Context) {
+    c->blob(200, "text/plain", tprintf("result: {}", c->param("urlp", u32) ?? 0))
+}
+
 main :: () {
     n := Nimbus.new()
 
     n->after(logger(style=.V2))
-    
 
     n->add_tagged_routes()
     n->get("/", index)

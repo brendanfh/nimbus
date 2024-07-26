@@ -49,15 +49,45 @@ Nimbus.add_tagged_routes :: (self: &#Self, pack := builtin.any_package) {
     router_collect_routes(self.global_router, pack)
 }
 
-Nimbus.before :: (self: &#Self, x: $T) {
+Nimbus.before :: #match #local {}
+
+#overload
+Nimbus.before :: (self: &Nimbus, x: HTTP_Handler)
+{
+    pipe := Pipeable.as_pipe(x)
+    self.pre_pipes->push(pipe)
+}
+
+#overload
+Nimbus.before :: (self: &Nimbus, x: $T) where Pipeable(&T)
+{
     v := new(x, self.allocator)
     self.pre_pipes->push(Pipeable.as_pipe(v))
 }
 
-Nimbus.after :: (self: &#Self, x: $T) {
-    v := new(x, self.allocator)
-    self.post_pipes->push(Pipeable.as_pipe(v))
+Nimbus.after :: #match #local {}
+
+#overload
+Nimbus.after :: (self: &Nimbus, x: HTTP_Handler)
+{
+    pipe := Pipeable.as_pipe(x)
+    pipe.after_commited = true
+
+    self.post_pipes->push(pipe)
 }
+
+#overload
+Nimbus.after :: (self: &Nimbus, x: $T) where Pipeable(&T)
+{
+    v := new(x, self.allocator)
+
+    pipe := Pipeable.as_pipe(v)
+    pipe.after_commited = true
+
+    self.post_pipes->push(pipe)
+}
+
+
 
 Nimbus.serve :: (self: &#Self, port: u32, settings := TCP_Settings.{}) -> Serve_Status {
     pipeline := construct_pipeline(self)
