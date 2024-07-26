@@ -13,7 +13,7 @@ cgi :: (nimbus: &Nimbus, p: Pipeline, stream: &io.Stream) {
     response_init(&res)
     defer response_free(&res)
 
-    c := make_context(nimbus, &req, &res, stream)
+    c := make_context(nimbus, &req, &res, stream, nimbus.allocator)
 
     pipe := p
     pipe->process(cast(Context) &c)

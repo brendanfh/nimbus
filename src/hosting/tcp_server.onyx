@@ -116,10 +116,8 @@ inner_handle_request :: (tcp: &TCP_Server, client: &net.TCP_Server.Client) -> bo
         return false
     }
 
-    // session_gc := alloc.gc.make()
-    // use_gc_allocator_in_current_scope(&session_gc)
-
-    defer alloc.clear_temp_allocator()
+    session_gc := alloc.gc.make()
+    use_gc_allocator_in_current_scope(&session_gc)
 
     // We have to copy the client's socket because the request handler
     // has the ability to call TCP_Server.Client.detach which frees the
@@ -130,8 +128,7 @@ inner_handle_request :: (tcp: &TCP_Server, client: &net.TCP_Server.Client) -> bo
     client_addr := client.address
     client_sock := client.socket
 
-    reader := io.reader_make(&client_sock)
-    defer io.reader_free(&reader)
+    use reader := io.reader_make(&client_sock)
 
     //
     // Loop until there is no data buffered in the reader.
@@ -143,6 +140,8 @@ inner_handle_request :: (tcp: &TCP_Server, client: &net.TCP_Server.Client) -> bo
     // then the TCP server will just say that the client is ready
     // to be read from again.
     while defer io.reader_get_buffered(&reader) > 0 {
+        defer alloc.clear_temp_allocator()
+
         req := Request.{
             client  = client,
             address = .{ client_addr->addr_as_str() }
@@ -157,7 +156,8 @@ inner_handle_request :: (tcp: &TCP_Server, client: &net.TCP_Server.Client) -> bo
         response_init(&res)
         defer response_free(&res)
 
-        c := new(make_context(tcp.nimbus, &req, &res, &client_sock), tcp.nimbus.allocator)
+        c := make_context(tcp.nimbus, &req, &res, &client_sock, context.allocator)
+            |> new(tcp.nimbus.allocator)
         defer destroy_context(c)
 
         // Process the request!

@@ -10,8 +10,6 @@ Context :: #distinct &_context
 _context :: struct {
     nimbus: &Nimbus
 
-    gc_state: &alloc.gc.GCState
-
     // The allocator for the current context
     allocator: Allocator
 
@@ -20,6 +18,8 @@ _context :: struct {
 
     // The stream to write the response to
     stream: &io.Stream
+
+    variables: Map(str, any)
 }
 
 #package
@@ -27,16 +27,22 @@ make_context :: (
     nimbus: &Nimbus,
     req: &Request,
     res: &Response,
-    stream: &io.Stream
+    stream: &io.Stream,
+    allocator: Allocator
 ) -> _context {
-    gc_state := new(alloc.gc.make(), nimbus.allocator)
-    return .{ nimbus, gc_state, alloc.as_allocator(gc_state), req, res, stream }
+    return .{
+        nimbus,
+        allocator,
+        req,
+        res,
+        stream,
+        make(Map(str, any), nimbus.allocator)
+    }
 }
 
 #package
 destroy_context :: (c: &_context) {
-    alloc.gc.clear(c.gc_state)
-    c.nimbus.allocator->free(c.gc_state)
+    delete(&c.variables)
 }
 
 
@@ -206,6 +212,21 @@ Context.file :: (self: Context, code: u32, mimetype: str, path: str) {
 
 
 
+Context.get :: (self: Context, key: str, $T: type_expr) -> ? T {
+    c := cast(&_context) self
+    value := c.variables->get(key)?
+    return misc.any_as(value, T) |> Optional.from_ptr()
+}
+
+Context.set :: (self: Context, key: str, v: any) {
+    c := cast(&_context) self
+
+    c.variables->put(
+        str.copy(key, c.allocator)
+        any_copy(v, c.allocator)
+    )
+}
+
 
 
 
@@ -213,5 +234,17 @@ Context.file :: (self: Context, code: u32, mimetype: str, path: str) {
 push_context :: macro () {
     c := context
     defer context = c
+}
+
+#local
+any_copy :: (x: any, allocator: Allocator) -> any {
+    use runtime.info
+    use core.memory
+
+    size := info.get_type_info(x.type).size
+    new_data := allocator->alloc(size)
+    memory.copy(new_data, x.data, size) 
+
+    return .{ new_data, x.type }
 }
 
