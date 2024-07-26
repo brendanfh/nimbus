@@ -1,0 +1,34 @@
+#load "./../module"
+
+use nimbus {*}
+use core.encoding.json
+
+index :: c => {
+    c->json(200, &.{
+        foo = "test"
+    })
+}
+
+@route.{.get, "/other"}
+other :: (c: Context) {
+    c->file(200, "text/plain", "./tests/demo.onyx")
+}
+
+main :: () {
+    n := Nimbus.new()
+
+    n->after(logger(style=.V2))
+    
+
+    n->add_tagged_routes()
+    n->get("/", index)
+    n->get("/html", c => {
+        c->set_header("X-WORKING", "thisisworkingwootwoot")
+
+        c->html(200, """
+        <h1>This works!</h1>
+        """)
+    })
+
+    n->serve(8080, .{ thread_count = 8, max_clients = 256 })
+}

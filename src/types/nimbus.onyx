@@ -1,0 +1,92 @@
+package nimbus
+
+use core {
+    stdio
+}
+
+
+/// The core `Nimbus` structure.
+///
+/// Contains all state of the current Nimbus server.
+Nimbus :: struct {
+    allocator: Allocator
+
+    pre_pipes:  [..] Pipe
+    post_pipes: [..] Pipe
+
+    global_router: &Router
+}
+
+
+Nimbus.new :: (allocator := context.allocator) -> #Self {
+    r := new(
+        router()
+        allocator
+    )
+
+    return .{
+        allocator = allocator
+        pre_pipes  = make([..] Pipe, allocator)
+        post_pipes = make([..] Pipe, allocator)
+        global_router = r
+    }
+}
+
+Nimbus.method :: (self: &#Self, method: HTTP_Method, path: str, handler: HTTP_Handler) {
+    self.global_router->route(method, path, handler)
+}
+
+Nimbus.get     :: (self: &#Self, path: str, handler: HTTP_Handler) { self->method(.GET, path, handler) }
+Nimbus.post    :: (self: &#Self, path: str, handler: HTTP_Handler) { self->method(.POST, path, handler) }
+Nimbus.put     :: (self: &#Self, path: str, handler: HTTP_Handler) { self->method(.PUT, path, handler) }
+Nimbus.patch   :: (self: &#Self, path: str, handler: HTTP_Handler) { self->method(.PATCH, path, handler) }
+Nimbus.delete  :: (self: &#Self, path: str, handler: HTTP_Handler) { self->method(.DELETE, path, handler) }
+Nimbus.connect :: (self: &#Self, path: str, handler: HTTP_Handler) { self->method(.CONNECT, path, handler) }
+Nimbus.options :: (self: &#Self, path: str, handler: HTTP_Handler) { self->method(.OPTIONS, path, handler) }
+Nimbus.head    :: (self: &#Self, path: str, handler: HTTP_Handler) { self->method(.HEAD, path, handler) }
+
+Nimbus.add_tagged_routes :: (self: &#Self, pack := builtin.any_package) {
+    router_collect_routes(self.global_router, pack)
+}
+
+Nimbus.before :: (self: &#Self, x: $T) {
+    v := new(x, self.allocator)
+    self.pre_pipes->push(Pipeable.as_pipe(v))
+}
+
+Nimbus.after :: (self: &#Self, x: $T) {
+    v := new(x, self.allocator)
+    self.post_pipes->push(Pipeable.as_pipe(v))
+}
+
+Nimbus.serve :: (self: &#Self, port: u32, settings := TCP_Settings.{}) -> Serve_Status {
+    pipeline := construct_pipeline(self)
+
+    tcp_server := tcp_server_make(self.allocator, pipeline, settings)
+    tcp_server.nimbus = self
+
+    return tcp_server->serve(port)
+}
+
+Nimbus.cgi :: (self: &#Self, stream := &stdio.stream) {
+
+}
+
+#local {
+    construct_pipeline :: (self: &Nimbus) -> Pipeline {
+        p := pipeline()
+
+        for self.pre_pipes {
+            p->pipe(it)
+        }
+
+        p->pipe(self.global_router)
+
+        for self.post_pipes {
+            p->pipe(it)
+        }
+
+        return p
+    }
+}
+

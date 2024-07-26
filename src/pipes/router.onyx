@@ -1,0 +1,317 @@
+package nimbus
+
+use runtime
+use core {tprintf}
+
+Router :: struct {
+    routes: [..] Route
+
+    // Prepended to every route
+    base_path := ""
+}
+
+#inject Router {
+    route          :: router_add_route
+    all            :: #solidify __quick_route {method=HTTP_Method.ALL}
+    get            :: #solidify __quick_route {method=HTTP_Method.GET}
+    post           :: #solidify __quick_route {method=HTTP_Method.POST}
+    put            :: #solidify __quick_route {method=HTTP_Method.PUT}
+    patch          :: #solidify __quick_route {method=HTTP_Method.PATCH}
+    delete         :: #solidify __quick_route {method=HTTP_Method.DELETE}
+
+    route_request :: router_route_request
+}
+
+HTTP_Handler :: #type (Context) -> void
+
+#package
+Route :: struct {
+    method:  HTTP_Method
+    elems: [] Elem
+    pipeline: Pipeline
+    
+    match_all: bool
+
+    Elem :: union {
+        Fixed: str
+        Variable: str
+    }
+}
+
+route :: struct {
+    method: HTTP_Method
+    route:  str
+}
+
+middleware :: struct {
+    func: HTTP_Handler
+}
+
+router :: (base_path := "") -> Router {
+    r: Router
+
+    r.base_path = base_path
+    r.routes    = make([..] Route, allocator=long_term_allocator)
+
+    return r
+}
+
+#package
+router_add_route :: #match #local {}
+
+
+//
+// This case is special, because without it, it is not possible
+// to say router->route(.GET, "/", (req, res) => {...}), as the
+// polymorphic procedure does not match. This is not entirely
+// correct behavior and may be due to an underlying compiler
+// bug. Either way, for now this overload has to be here.
+#overload
+router_add_route :: (router: &Router, method: HTTP_Method, route: str, handle: HTTP_Handler) {
+    pipes := pipeline()
+    pipes->add(handle)
+
+    router.routes << Route.{
+        method = method,
+        pipeline = pipes,
+        elems = process_url_to_route_elems(route),
+        match_all = true,
+    }
+
+    sort_routes(router)
+}
+
+#overload
+router_add_route :: macro (router: &Router, method: HTTP_Method, route: str, pipeline: Pipeline, match_all := false) {
+    Route :: Route
+    router.routes << Route.{
+        method = method,
+        pipeline = pipeline,
+        elems = process_url_to_route_elems(route),
+        match_all = match_all,
+    }
+
+    sort_routes :: sort_routes
+    sort_routes(router)
+}
+
+#overload
+router_add_route :: macro (router: &Router, route: str, handle: $T/Pipeable) {
+    router->route(.ALL, route, handle)
+}
+
+#overload
+router_add_route :: (router: &Router, method: HTTP_Method, route: str, handle: $T/Pipeable) {
+    pipes := pipeline()
+    pipes->add(handle)
+
+    router.routes << Route.{
+        method = method,
+        pipeline = pipes,
+        elems = process_url_to_route_elems(route),
+        match_all = false,
+    }
+
+    sort_routes :: sort_routes
+    sort_routes(router)
+}
+
+#overload
+router_add_route :: (router: &Router, method: HTTP_Method, route: str, steps: ..Pipe) {
+    pipes := pipeline()
+    for steps do pipes->add(it)
+
+    router.routes << Route.{
+        method = method,
+        pipeline = pipes,
+        elems = process_url_to_route_elems(route),
+        match_all = false,
+    }
+
+    sort_routes :: sort_routes
+    sort_routes(router)
+}
+
+
+#local
+__quick_route :: (router: &Router, $method: HTTP_Method, route: str, handle: HTTP_Handler) {
+    router_add_route(router, method, route, handle)
+}
+
+#package
+router_collect_routes :: (router: &Router, pack := builtin.any_package) {
+    procs := runtime.info.get_procedures_with_tag(route)
+    for procs {
+        if pack != any_package && pack != it.pack do continue
+
+        pipes := pipeline()
+        for tag in runtime.info.get_tags_for_procedure(it.func) {
+            if tag.type == middleware {
+                mw := cast(&middleware) tag.data
+                pipes->add(mw.func)
+            }
+        }
+
+        pipes->add(*cast(&HTTP_Handler) &it.func)
+
+        for tag in runtime.info.get_tags_for_procedure(it.func) {
+            if tag.type == route {
+                r := cast(&route) tag.data
+                router_add_route(router, r.method, r.route, pipes, true)
+            }
+        }
+    }
+}
+
+#local
+pattern_length :: macro (v: Route.Elem) -> i32 {
+    switch v {
+        case .Variable => var_name do return var_name.length
+        case .Fixed    => fixed    do return fixed.length
+    }
+}
+
+#local
+sort_routes :: (router: &Router) {
+    Slice.sort(router.routes, (a, b) => {
+        for i in core.math.min(a.elems.count, b.elems.count) {
+            left := a.elems[i]
+            right := b.elems[i]
+
+            // Different: fixed first
+            if left.tag != right.tag {
+                return 1 if right.tag == .Fixed else -1
+            }
+
+            // Same and fixed: longer string first
+            if left.tag == .Fixed {
+                s1 := left.Fixed?
+                s2 := right.Fixed?
+
+                // Same, fixed, and same string, continue
+                if s1 == s2 {
+                    continue
+                }
+
+                return s2.count - s1.count
+            }
+
+            // Same and variable: continue
+        }
+
+        return b.elems.count - a.elems.count
+    })
+}
+
+
+#package
+router_route_request :: (router: &Router, c: Context) {
+    req := c->request()
+
+    if !str.starts_with(req.endpoint, router.base_path) {
+        return
+    }
+
+    previous_endpoint := req.endpoint
+    defer req.endpoint = previous_endpoint
+
+    req.endpoint = req.endpoint[router.base_path.length .. req.endpoint.length]
+
+    tmp_url_params: [..] struct { name, value: str }
+    
+    for& router.routes {
+        if it.method != .ALL && it.method != req.method do continue
+        Array.clear(&tmp_url_params)
+
+        matched_parts := pattern_match_routes(it.elems, req._processed_endpoint, &tmp_url_params).Matched
+        if !matched_parts do continue
+
+        if it.match_all && matched_parts->unwrap() != req._processed_endpoint.length {
+            // If we have to match the entire rest of the route, and we didn't, skip this one.
+            continue
+        }
+
+        for tmp_url_params do req.params[it.name] = it.value
+        req._processed_endpoint = req._processed_endpoint[matched_parts? .. req._processed_endpoint.length]
+
+        it.pipeline->process(c)
+
+        // Should this really return here?
+        // What if the matched route is a subrouter that fails, but
+        // another route would later match better?
+        return
+    }
+}
+
+#local
+PatternMatchResult :: union {
+    NoMatch: void
+    Matched: i32
+}
+
+#local
+pattern_match_routes :: (expected: [] Route.Elem, actual: [] Route.Elem, variables: &$T) -> PatternMatchResult {
+    matched_count := 0
+    for iter.zip(
+        iter.as_iter(expected),
+        iter.as_iter(actual))
+    {
+        if it.second.tag == .Variable {
+            // Variables are illegal in provided `actual`
+            return .{ NoMatch = .{} }
+        }
+
+        provided_pattern := it.second.Fixed?
+
+        switch it.first {
+            case .Fixed as expected_pattern {
+                if expected_pattern != provided_pattern do return .{ NoMatch = .{} }
+            }
+
+            case .Variable as variable_name {
+                Array.push(variables, .{ variable_name, provided_pattern })
+            }
+        }
+
+        matched_count += 1
+    }
+
+    if expected.count == 0 && actual.count != 0 {
+        return .{ NoMatch = .{} }
+    }
+
+    if matched_count != expected.count {
+        return .{ NoMatch = .{} }
+    }
+
+    return .{ Matched = matched_count }
+}
+
+#package
+process_url_to_route_elems :: (s: str) -> [] Route.Elem {
+    if s == "/" do return .{}
+
+    if s[0] != '/' {
+        log(.Warning, "Nimbus", tprintf("Poorly formatted route: {}", s))
+        return .{}
+    }
+
+    elem_count := Slice.count_where(s, [c](c == '/'))
+    elems := make([..] Route.Elem, elem_count, long_term_allocator)
+
+    for str.split_iter(s, '/')->skip(1) {
+        pattern := it
+        if it[0] == ':' {
+            str.advance(&pattern)
+            elems << .{ Variable = pattern }
+        } else {
+            elems << .{ Fixed = pattern }
+        }
+    }
+
+    return elems
+}
+
+
+#overload
+Pipeable.as_pipe :: macro (r: &Router) => Pipe.{router_route_request, r}

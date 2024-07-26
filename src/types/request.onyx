@@ -1,0 +1,267 @@
+package nimbus
+
+use runtime
+use core.encoding.json
+use core.memory
+use core.net
+
+Request :: struct {
+    method: HTTP_Method
+
+    // base_endpoint is what was originally requested.
+    // endpoint is modified through request routing,
+    // and ends up being the final route that was
+    // matched.
+    endpoint: str
+    _processed_endpoint: [] Route.Elem
+
+    headers: Map(str, str)
+    query:   Map(str, str)
+    cookies: Map(str, str)
+    params:  Map(str, str)
+
+     // This is only set when the TCP host is used.
+    client: &net.TCP_Server.Client
+
+    address: Request_Address
+
+    body_reader: &io.Reader
+    _body_was_read := false
+
+    _body_cache: ? Request_Body
+}
+
+Request_Address :: struct {
+    ip: str
+}
+
+Request_Body :: union {
+    Form: Map(str, [..] str)
+    Json: json.Json
+}
+
+#package
+request_free :: (req: &Request) {
+    delete(&req.headers)
+    delete(&req.query)
+    delete(&req.cookies)
+    delete(&req.params)
+}
+
+#package
+request_get_body :: (req: &Request) -> &Request_Body {
+    if req._body_cache {
+        return req._body_cache->unwrap_ptr()
+    }
+
+    body: Request_Body
+
+    content_type := req.headers["content-type"] ?? ""
+
+    if content_type == "application/json" ||
+        (str.starts_with(content_type, "application/") && str.ends_with(content_type, "+json"))
+    {
+        switch request_parse_json(req) {
+            case .None do logf(.Warning, "Failed to parse JSON body")
+            case .Some as data {
+                body = .{ Json = data }
+            }
+        }
+    }
+
+    elseif str.starts_with(content_type, "application/x-www-form-urlencoded")
+    {
+        body = .{ Form = request_parse_form_urlencoded(req) }
+    }
+    
+    elseif str.starts_with(content_type, "multipart/form-data")
+    {
+        switch request_parse_multipart_form(req) {
+            case .None do logf(.Warning, "Failed to read multipart/form-data")
+            case .Some as data {
+                body = .{ Form = data }
+            }
+        }
+    }
+    
+    req._body_cache = body
+    return req._body_cache->unwrap_ptr()
+}
+
+#package
+request_parse_raw :: (req: &Request) -> str {
+    req.headers->get("transfer-encoding")->with([encoding] {
+        if encoding == "chunked" {
+            panic("TODO: handle chunked body")
+        }
+    })
+
+    req.headers->get("content-length")->and_then(x => conv.parse(u32, x))->with([content_length] {
+        if content_length == 0 {
+            return ""
+        }
+ 
+        content := make([] u8, content_length)
+        index := 0
+        while index < content_length {
+            read, err := req.body_reader->read_bytes(content[index .. content_length])
+            index += read
+        }
+
+        req._body_was_read = true
+        return content
+    })
+
+    return ""
+}
+
+#package
+request_parse_json :: (req: &Request) -> ? json.Json {
+    contents := request_parse_raw(req)
+
+    return json.decode(contents)
+}
+
+#package
+request_parse_form_urlencoded :: (req: &Request) -> Map(str, [..] str) {
+    out := make(Map(str, [..] str))
+
+    content := request_parse_raw(req)
+    parse_url_encoded_key_value_multi(&out, &content)
+
+    return out
+}
+
+#package
+request_parse_multipart_form :: (req: &Request) -> ? Map(str, [..] str) {
+    out := make(Map(str, [..] str))
+
+    _, boundary_map := str.bisect(req.headers["content-type"] ?? "", '')
+    key, value      := str.bisect(boundary_map, '=')
+
+    str.strip_leading_whitespace(&key)
+    str.strip_leading_whitespace(&value)
+
+    if key != "boundary" {
+        return .None
+    }
+
+    boundary := value
+    if value[0] == '"' {
+        // Remove "" if they are present around boundary name
+        boundary = value[1 .. value.length - 1]
+    }
+
+    boundary_delimiter := core.tprintf("--{}", boundary)
+
+    content := request_parse_raw(req)
+    while content.length > 0 {
+        str.read_until(&content, '\n')
+        str.advance(&content, 1)
+
+        if content.length == 0 do break
+
+        part_name := ""
+        while !str.starts_with(content, "\r\n") {
+            key, value := parse_header(&content)
+
+            if key == "content-disposition" {
+                str.strip_leading_whitespace(&value)
+                if !str.starts_with(value, "form-data") do continue
+                str.advance(&value, "form-data".length)
+
+                str.strip_leading_whitespace(&value)
+                if !str.starts_with(value, "name=\"") do continue
+                str.advance(&value, "name=\"".length)
+
+                part_name = str.read_until(&value, '"')
+            }
+        }
+
+        part_value := str.read_until(&content, boundary_delimiter)
+                      |> str.strip_whitespace()
+
+        values := out->get_ptr_or_create(part_name)
+        values->push(part_value)
+    }
+
+    return out
+}
+
+// #inject
+// Request_Body.form_into :: (body: &Request_Body, $T: type_expr) -> T {
+//     use runtime.info {get_type_info}
+// 
+//     out: T
+// 
+//     form := body->form()
+//     defer delete(&form.fields)
+// 
+//     for& member in get_type_info(T)->as_struct().members {
+//         field := form.fields[member.name]
+//         if !field do continue
+// 
+//         field_value := field->unwrap()[0]
+// 
+//         if member.type == str {
+//             *cast(&str, memory.ptr_add(&out, member.offset)) = field_value
+//         } else {
+//             core.conv.parse_any(memory.ptr_add(&out, member.offset), member.type, field_value)
+//         }
+//     }
+// 
+//     return out
+// }
+
+#package
+parse_multipart_form_data :: (r: &Request, dest: &Map(str, [..] str)) {
+    _, boundary_map := str.bisect(r.headers["content-type"] ?? "", '')
+    key, value      := str.bisect(boundary_map, '=')
+    str.strip_leading_whitespace(&key)
+    str.strip_leading_whitespace(&value)
+
+    if key != "boundary" {
+        return
+    }
+
+    boundary := value
+    if value[0] == '"' {
+        // Remove "" if they are present around boundary name
+        boundary = value[1 .. value.length - 1]
+    }
+
+    boundary_delimiter := core.tprintf("--{}", boundary)
+
+    // content := r.body->raw()
+    // while content.length > 0 {
+    //     str.read_until(&content, '\n')
+    //     str.advance(&content, 1)
+
+    //     if content.length == 0 do break
+
+    //     part_name := ""
+    //     while !str.starts_with(content, "\r\n") {
+    //         key, value := parse_header(&content)
+
+    //         if key == "content-disposition" {
+    //             str.strip_leading_whitespace(&value)
+    //             if !str.starts_with(value, "form-data") do continue
+    //             str.advance(&value, "form-data".length)
+
+    //             str.strip_leading_whitespace(&value)
+    //             if !str.starts_with(value, "name=\"") do continue
+    //             str.advance(&value, "name=\"".length)
+
+    //             part_name = str.read_until(&value, '"')
+    //         }
+    //     }
+
+    //     part_value := str.read_until(&content, boundary_delimiter)
+    //                   |> str.strip_whitespace()
+
+    //     values := dest->get_ptr_or_create(part_name)
+    //     Array.push(values, part_value)
+    // }
+}
+
+

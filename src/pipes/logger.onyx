@@ -1,0 +1,72 @@
+package nimbus
+
+Logger :: struct {
+    writer: io.Writer;
+
+    style := LoggerStyle.V1;
+
+    log :: logger_log_request
+}
+
+LoggerStyle :: enum {
+    V1;
+    V2;
+}
+
+
+logger :: (s: &io.Stream = &core.stdio.stream, style := LoggerStyle.V1) -> Logger {
+    return .{
+        io.writer_make(s),
+        style
+    };
+}
+
+#package
+logger_log_request :: (l: &Logger, c: Context) {
+    req := c->request()
+    res := c->_response()
+
+    switch l.style {
+        case .V1 do 
+            io.write_format(
+                &l.writer,
+                "[{}] {} {} {}{} - {}\n",
+                context.thread_id,
+                req.address.ip,
+                req.method,
+                req.headers["host"] ?? "", req.endpoint,
+                res.status);
+
+        case .V2 {
+            status_color := "92";
+            if res.status / 100 != 2 {
+                status_color = "93";
+            }
+            if res.status >= 400 {
+                status_color = "91";
+            }
+
+            io.write_format(
+                &l.writer,
+                "{}: [\e[1;{}m{}\e[0m] \e[1;94m{} {}\e[0m  host: '{}' client: '{}'\n",
+                context.thread_id,
+                status_color,
+                res.status,
+                req.method,
+                req.endpoint,
+                req.headers["host"] ?? "",
+                req.address.ip
+            );
+        }
+    }
+
+    io.writer_flush(&l.writer);
+    io.stream_flush(l.writer.stream);
+}
+
+#overload
+Pipeable.as_pipe :: macro (l: &Logger) => Pipe.{
+    logger_log_request,
+    l,
+    after_commited = true,
+}

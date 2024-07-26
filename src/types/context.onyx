@@ -1,0 +1,214 @@
+package nimbus
+
+use core.encoding.json
+use core.misc
+
+
+Context :: #distinct &_context
+
+#package
+_context :: struct {
+    nimbus: &Nimbus
+
+    gc_state: &alloc.gc.GCState
+
+    // The allocator for the current context
+    allocator: Allocator
+
+    req: &Request
+    res: &Response
+
+    stream: &io.Stream
+}
+
+#package
+make_context :: (
+    nimbus: &Nimbus,
+    req: &Request,
+    res: &Response,
+    stream: &io.Stream
+) -> _context {
+    gc_state := new(alloc.gc.make(), nimbus.allocator)
+    return .{ nimbus, gc_state, alloc.as_allocator(gc_state), req, res, stream }
+}
+
+#package
+destroy_context :: (c: &_context) {
+    alloc.gc.clear(c.gc_state)
+    c.nimbus.allocator->free(c.gc_state)
+}
+
+
+//
+// Request methods
+//
+
+Context.request :: (self: Context) -> &Request {
+    c := cast(&_context) self
+    return c.req
+}
+
+Context.path :: (self: Context) -> str {
+    c := cast(&_context) self
+    return c.req.endpoint
+}
+
+Context.method :: (self: Context) -> HTTP_Method {
+    c := cast(&_context) self
+    return c.req.method
+}
+
+Context.header :: (self: Context, header: str) -> ? str {
+    c := cast(&_context) self
+    return c.req.headers[header]
+}
+
+Context.query :: #match #local {}
+
+#overload
+Context.query :: (self: Context, query: str) -> ? str {
+    c := cast(&_context) self
+    return c.req.query[query]
+}
+
+#overload
+Context.query :: (self: Context, query: str, $T: type_expr) -> ? T {
+    c := cast(&_context) self
+
+    #if T == str {
+        return c.req.query[query]
+    } else {
+        return c.req.query[query]->and_then(q => conv.parse(T, q, c.allocator))
+    }
+}
+
+Context.query_names :: (self: Context) -> [] str {
+    c := cast(&_context) self
+    return iter.as_iter(&c.req.params)
+        |> iter.map(x => x.key)
+        |> iter.collect(c.allocator)
+}
+
+Context.cookie :: (self: Context, cookie: str) -> ? str {
+    c := cast(&_context) self
+    return c.req.cookies[cookie]
+}
+
+Context.param :: #match #local {}
+
+#overload
+Context.param :: (self: Context, param: str) -> ? str {
+    c := cast(&_context) self
+    return c.req.params[param]
+}
+
+#overload
+Context.param :: (self: Context, param: str, $T: type_expr) -> ? T {
+    c := cast(&_context) self
+
+    #if T == str {
+        return c.req.params[param]
+    } else {
+        return c.req.params[param]->and_then(q => conv.parse(T, q, c.allocator))
+    }
+}
+
+Context.param_names :: (self: Context) -> [] str {
+    c := cast(&_context) self
+    return iter.as_iter(&c.req.params)
+        |> iter.map(x => x.key)
+        |> iter.collect(c.allocator)
+}
+
+
+//
+// Response methods
+//
+
+/// Returns in the internal Response object of the Context.
+/// You will likely never need to use this directly.
+Context._response :: (self: Context) -> &Response {
+    c := cast(&_context) self
+    return c.res
+}
+
+Context.set_header :: (self: Context, header: str, value: str) {
+    c := cast(&_context) self
+    c.res.headers->put(header, value)
+}
+
+Context.set_cookie :: (self: Context, name: str, value: str) {
+    c := cast(&_context) self
+    c.res.cookies->put(name, value)
+}
+
+Context.no_content :: (self: Context, code: u32) {
+    c := cast(&_context) self
+    c.res.status = code
+    response_write_headers(c.res, c.stream)
+}
+
+Context.redirect :: (self: Context, code: u32, uri: str) {
+    c := cast(&_context) self
+
+    if code < 300 || code > 308 {
+        logf(.Warning, "Invalid HTTP status code for redirection ({}). Using 301 instead.", code)
+        code = 301
+    }
+
+    c.res.status = code
+    c.res.headers["Location"] = uri
+    response_write_headers(c.res, c.stream)
+    response_flush_body(c.res, c.stream)
+}
+
+Context.blob :: (self: Context, code: u32, mimetype: str, content: [] u8) {
+    c := cast(&_context) self
+
+    c.res.status = code
+    c.res.headers["Content-Type"] = mimetype
+
+    c.res.writer->write(content)
+
+    response_write_headers(c.res, c.stream)
+    response_flush_body(c.res, c.stream)
+}
+
+Context.json :: (self: Context, code: u32, data: any) {
+    c := cast(&_context) self
+
+    // Write the JSON to the response buffer
+    json.encode(&c.res.writer, misc.any_dereference(data))
+
+    c.res.status = code
+    c.res.headers["Content-Type"] = "application/json"
+
+    response_write_headers(c.res, c.stream)
+    response_flush_body(c.res, c.stream)
+}
+
+Context.html :: (self: Context, code: u32, html: str) {
+    self->blob(code, "text/html", html)
+}
+
+Context.file :: (self: Context, code: u32, mimetype: str, path: str) {
+    push_context()
+
+    c := cast(&_context) self
+    context.allocator = c.allocator
+
+    self->blob(code, mimetype, os.get_contents(path))
+}
+
+
+
+
+
+
+
+#local
+push_context :: macro () {
+    c := context
+    defer context = c
+}
+

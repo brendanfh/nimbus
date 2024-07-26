@@ -1,0 +1,238 @@
+package nimbus
+
+use runtime
+
+#package
+TCP_Server :: struct {
+    nimbus: &Nimbus
+
+    server: &net.TCP_Server
+    pipeline: Pipeline
+
+    thread_pool: [] thread.Thread
+
+    ready_clients: sync.Channel(&net.TCP_Server.Client)
+
+    max_clients: i32
+}
+
+TCP_Settings :: struct {
+    max_clients := 32
+    thread_count := 0
+}
+
+#package
+tcp_server_make :: (allocator: Allocator, pipeline: Pipeline, settings: TCP_Settings) -> &TCP_Server {
+    threads := make([] thread.Thread, settings.thread_count)
+
+    server := new(TCP_Server.{
+        pipeline = pipeline,
+        thread_pool = threads,
+        max_clients = settings.max_clients
+    }, allocator)
+
+    server.ready_clients = sync.Channel.make(&net.TCP_Server.Client)
+
+    for& t in threads {
+        thread.spawn(t, server, tcp_server_thread)
+    }
+
+    return server
+}
+
+
+
+Serve_Status :: enum {
+    Success
+    Failed_To_Bind
+}
+
+TCP_Server.serve :: (tcp: &TCP_Server, port: u32) -> Serve_Status {
+    tcp.server = net.tcp_server_make(max_clients=tcp.max_clients)
+
+    // Tell the server to not read the data and just tell us when a
+    // client is ready to be read from.
+    tcp.server.emit_data_events = false
+
+    // Allows the server to be immediately restarted. Not
+    // the safest, but it is fine for a development instance.
+    tcp.server.socket->option(.ReuseAddress, true)
+
+    if !tcp.server->listen(~~port) {
+        log(.Error, "Nimbus", core.tprintf("Failed to bind to port {}.\n", port))
+        return .Failed_To_Bind
+    }
+
+    log(.Info, "Nimbus", core.tprintf("Serving on port {}", port))
+    tcp.server->handle_events() {
+        case .Ready {
+            ready_client := cast(&core.net.TCP_Event.Ready, it.data).client
+            if ready_client.socket.vtable == null || ready_client.state != .Alive {
+                log(.Warning, "Nimbus", "Discarding dead client")
+                ready_client->read_complete()
+                continue
+            }
+
+            if !tcp.thread_pool {
+                handle_request(tcp, ready_client)
+
+            } else {
+                tcp.ready_clients->send(ready_client)
+            }
+        }
+    }
+
+    return .Success
+}
+
+#local
+tcp_server_thread :: (tcp: &TCP_Server) {
+    while true {
+        client := tcp.ready_clients->recv()?
+        handle_request(tcp, client)
+    }
+}
+
+#local
+handle_request :: (tcp: &TCP_Server, client: &net.TCP_Server.Client) {
+    if !inner_handle_request(tcp, client) {
+        if !client.socket.alive || client.socket.vtable == null {
+            return
+        }
+
+        // Close the connection if we failed to read the request.
+        io.stream_write(&client.socket, "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n")
+        tcp.server->kill_client(client)
+
+    } else {
+        client->read_complete()
+    }
+}
+
+#local
+inner_handle_request :: (tcp: &TCP_Server, client: &net.TCP_Server.Client) -> bool {
+    // If the stream is no longer set up correctly, abandon it.
+    if !client.socket.alive || client.socket.vtable == null {
+        return false
+    }
+
+    // session_gc := alloc.gc.make()
+    // use_gc_allocator_in_current_scope(&session_gc)
+
+    defer alloc.clear_temp_allocator()
+
+    // We have to copy the client's socket because the request handler
+    // has the ability to call TCP_Server.Client.detach which frees the
+    // client and releases control of the socket to the caller. This
+    // enables WebSockets and similar protocols. However, here we still
+    // need to respond to the request, so we must copy the socket to
+    // use it later.
+    client_addr := client.address
+    client_sock := client.socket
+
+    reader := io.reader_make(&client_sock)
+    defer io.reader_free(&reader)
+
+    //
+    // Loop until there is no data buffered in the reader.
+    // If two requests were sent back-to-back, there is a non-zero
+    // chance the reader will start consuming the second request
+    // when reading the body/headers of the first. If it does,
+    // immediately process that data here, otherwise it will be
+    // lost forever. If the reader doesn't start reading those bytes,
+    // then the TCP server will just say that the client is ready
+    // to be read from again.
+    while defer io.reader_get_buffered(&reader) > 0 {
+        req := Request.{
+            client  = client,
+            address = .{ client_addr->addr_as_str() }
+        }
+        defer request_free(&req)
+
+        if !parse_request(&req, &reader) {
+            return false
+        }
+
+        res: Response
+        response_init(&res)
+        defer response_free(&res)
+
+        c := new(make_context(tcp.nimbus, &req, &res, &client_sock), tcp.nimbus.allocator)
+        defer destroy_context(c)
+
+        // Process the request!
+        tcp.pipeline->process(~~c)
+
+        // If the body was not read for some reason,
+        // we need to read it before we can read the next request.
+        if !req._body_was_read {
+            request_parse_raw(&req)
+        }
+
+        // When switching protocols, just bail here.
+        // In theory the reader should be empty anyway,
+        // but just break to be safe.
+        if res.status == 101 {
+            break
+        }
+    }
+
+    return true
+}
+
+
+#local
+parse_request :: (req: &Request, r: &io.Reader) -> bool {
+    request_line := r->read_line()
+    if request_line.length == 0 do return false
+
+    method, request_line~ := str.bisect(request_line, ' ')
+
+    req.method = runtime.info.enum_values(HTTP_Method)
+        |> Array.find_opt([v](v.name == method))
+        |> Optional.transform(x => cast(HTTP_Method) x.value)
+        |> Optional.value_or(.UNKNOWN)
+
+    route, request_line~ := str.bisect(request_line, ' ')
+
+    if str.starts_with(route, "http://") || str.starts_with(route, "https://") {
+        str.read_until(&route, "/", 2)
+    }
+
+    query_params: _
+    req.endpoint, query_params = str.bisect(route, '?')
+
+    req._processed_endpoint = process_url_to_route_elems(req.endpoint)
+
+    parse_url_encoded_key_value(&req.query, &query_params)
+
+    while true {
+        header, value := parse_header(r)
+        if header == "" do break
+
+        if header == "cookie" {
+            // Parse cookies
+            parse_cookies(value, &req.cookies)
+            continue
+        }
+
+        req.headers[header] = value
+    }
+
+    req.body_reader = r
+    return true
+}
+
+
+
+#local
+use_gc_allocator_in_current_scope :: macro (gc: &alloc.gc.GCState) {
+    old_allocator := context.allocator
+    context.allocator = alloc.as_allocator(gc)
+
+    defer {
+        alloc.gc.clear(gc)
+        context.allocator = old_allocator
+    }
+}
+

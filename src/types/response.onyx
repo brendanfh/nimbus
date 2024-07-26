@@ -1,0 +1,186 @@
+package nimbus
+
+use core {io}
+
+Response :: struct {
+    output: &io.BufferStream
+    writer: io.Writer
+
+    //
+    // Apparently, this is not the best way to represent
+    // headers because there can be cases where multiple
+    // headers of the same name are present. Techincally,
+    // they should be combinable into a single header with
+    // comma separated values. However, sometimes that
+    // apparently that does not always work. Also, there
+    // was an issue opened in 2015 on nodejs's http library
+    // about this exact issue and it still in 2022 has not
+    // been fully resolved.
+    headers: Map(str, str)
+    cookies: Map(str, str)
+    status: u32
+
+    chunked  := false
+    commited := false
+}
+
+#package {
+    response_init :: (res: &Response) {
+        res.writer, res.output = io.string_builder()
+    }
+
+    response_free :: (res: &Response) {
+        delete(&res.headers)
+        delete(&res.cookies)
+
+        delete(&res.writer)
+        delete(res.output)
+        cfree(res.output)
+    }
+
+    response_prepare_for_write :: (res: &Response) {
+        if res.commited do return
+
+        // Add the Date header.
+        t := time.now()
+
+        buf: [128] u8
+        formatted_time := time.strftime(buf, "%a, %d %b %Y %H:%M:%S +0000", &t)
+        res.headers["Date"] = formatted_time |> str.copy()
+
+        res.headers["Server"] = "nimbus/0.0.1"
+
+        if !res.headers->has("Content-Type") {
+            res.headers["Content-Type"] = "text/plain"
+        }
+
+        if res.chunked {
+            res.headers["Transfer-Encoding"] = "chunked"
+
+        } else {
+            content := str.as_str(res.output)
+            res.headers["Content-Length"] = core.tprintf("{}", content.length)
+        }
+    }
+
+    response_write_headers :: (res: &Response, s: &io.Stream) {
+        if res.commited {
+            logf(.Warning, "attempting to re-write headers of commited response")
+            return
+        }
+
+        response_prepare_for_write(res)
+
+        w := io.writer_make(s, 0)
+
+        io.write_format(&w, "HTTP/1.1 {} {}\r\n",
+            res.status,
+            status_code_to_message(res.status))
+
+        for& res.headers.entries {
+            io.write_format(&w, "{}: {}\r\n", it.key, it.value)
+        }
+
+        for& res.cookies.entries {
+            io.write_format(&w, "Set-Cookie: {}={} Path=/\r\n", it.key, it.value)
+        }
+
+        io.write(&w, "\r\n")
+
+        res.commited = true
+    }
+
+    response_flush_body :: (res: &Response, s: &io.Stream) {
+        contents := str.as_str(res.output)
+        defer io.stream_flush(res.output)
+
+        use w := io.writer_make(s, 0)
+
+        // This is not what chunked is for...
+        if res.chunked {
+            remaining := contents.length
+            while remaining > 0 {
+                to_send := core.math.min(remaining, 16 * 1024)
+                io.write(&w, core.tprintf("{b16}\r\n", to_send))
+                io.write(&w, contents[0 .. to_send])
+                io.write(&w, "\r\n")
+
+                str.advance(&contents, to_send)
+                remaining -= to_send
+            }
+
+            io.write(&w, "0\r\n\r\n")
+
+        } else {
+            io.write(&w, contents)
+        }
+    }
+
+    status_code_to_message :: (s: u32) => {
+        switch s {
+            case 100 do return "Continue"
+            case 101 do return "Switching Protocols"
+            case 102 do return "Processing"
+            case 103 do return "Early Hints"
+
+            case 200 do return "OK"
+            case 201 do return "Created"
+            case 202 do return "Accepted"
+            case 203 do return "Non-Authoritative Information"
+            case 204 do return "No Content"
+            case 205 do return "Reset Content"
+            case 206 do return "Partial Content"
+
+            case 300 do return "Multiple Choices"
+            case 301 do return "Moved Permanently"
+            case 302 do return "Found"
+            case 303 do return "See Other"
+            case 304 do return "Not Modified"
+            case 305 do return "Use Proxy"
+            case 307 do return "Temporary Redirect"
+            case 308 do return "Permanent Redirect"
+
+            case 400 do return "Bad Request"
+            case 401 do return "Unauthorized"
+            case 402 do return "Payment Required"
+            case 403 do return "Forbidden"
+            case 404 do return "Not Found"
+            case 405 do return "Method Not Allowed"
+            case 406 do return "Not Acceptable"
+            case 407 do return "Proxy Authenication Required"
+            case 408 do return "Request Timeout"
+            case 409 do return "Conflict"
+            case 410 do return "Gone"
+            case 411 do return "Length Required"
+            case 412 do return "Precondition Failed"
+            case 413 do return "Payload Too Large"
+            case 414 do return "URI Too Long"
+            case 415 do return "Unsupported Media Type"
+            case 416 do return "Range Not Satisfiable"
+            case 417 do return "Expectation failed"
+            case 418 do return "I'm a teapot"
+            case 421 do return "Misdirected Request"
+            case 422 do return "Unprocessable Entity"
+            case 425 do return "Too Early"
+            case 426 do return "Upgrade Required"
+            case 428 do return "Precondition Required"
+            case 429 do return "Too Many Requests"
+            case 431 do return "Request Header Fields Too Large"
+            case 451 do return "Unavailable For Legal Reasons"
+
+            case 500 do return "Internal Server Error"
+            case 501 do return "Not Implemented"
+            case 502 do return "Bad Gateway"
+            case 503 do return "Service Unavailable"
+            case 504 do return "Gateway Timeout"
+            case 505 do return "HTTP Version Not Supported"
+            case 506 do return "Variant Also Neogitates"
+            case 507 do return "Insufficient Storage"
+            case 508 do return "Loop Detected"
+            case 510 do return "Not Extended"
+            case 511 do return "Network Authenication Required"
+
+            case _ do return "UNKNOWN"
+        }
+    }
+}

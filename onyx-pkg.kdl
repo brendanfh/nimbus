@@ -13,7 +13,7 @@ config {
 
 lsp {
     mode "project" 
-    source_files "src/main.onyx" 
+    source_files "tests/demo.onyx" 
     include_dirs "" 
     working_dir "." 
 }

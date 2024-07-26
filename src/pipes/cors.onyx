@@ -1,0 +1,29 @@
+package nimbus
+
+use core {tprintf}
+
+cors :: struct {
+    allowed_origins: [] str
+    max_age := 86400
+}
+
+#local
+cors_handler :: (c: &cors, ctx: Context) {
+    origins := str.join(c.allowed_origins, ", ") if c.allowed_origins else "*"
+
+    ctx->set_header("Access-Control-Allow-Origin", origins)
+    ctx->set_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+
+    if ctx->method() == .OPTIONS {
+        ctx->header("access-control-request-headers")
+        |> Optional.value_or("")
+        |> ctx->set_header("Access-Control-Allow-Headers", _)
+
+        ctx->set_header("Access-Control-Max-Age", tprintf("{}", c.max_age))
+        ctx->no_content(204)
+    }
+}
+
+#overload
+Pipeable.as_pipe :: (c: &cors) => Pipe.{cors_handler, c}
+
