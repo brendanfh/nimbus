@@ -4,36 +4,23 @@ use runtime {info}
 use core.os
 use core { stdio }
 
-CGI :: struct {
-    pipeline: Pipeline
-}
-
-cgi :: #match {}
-
-#overload
-cgi :: (p: $P/Pipeable) {
-    pipe := pipeline()
-    pipe->pipe(p)
-    cgi(pipe)
-}
-
-#overload
-cgi :: (p: Pipeline) {
-    req := make_request_from_env()
+#package
+cgi :: (nimbus: &Nimbus, p: Pipeline, stream: &io.Stream) {
+    req := make_request_from_env(stream)
     defer request_free(&req)
 
     res: Response
     response_init(&res)
     defer response_free(&res)
 
-    c := make_context(null, &req, &res, &stdio.stream)
+    c := make_context(nimbus, &req, &res, stream)
 
     pipe := p
     pipe->process(cast(Context) &c)
 }
 
-
-make_request_from_env :: () -> Request {
+#package
+make_request_from_env :: (stream: &io.Stream) -> Request {
     env := os.env_vars()
 
     req: Request
@@ -59,7 +46,7 @@ make_request_from_env :: () -> Request {
     
     parse_cookies(env["HTTP_COOKIE"] ?? "", &req.cookies)
 
-    req.body_reader = alloc.on_heap(io.reader_make(&stdio.stream))
+    req.body_reader = new(io.reader_make(stream))
 
     return req
 }

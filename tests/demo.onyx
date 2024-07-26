@@ -17,13 +17,24 @@ other :: (c: Context) {
 
 @route.{.get, "/test/:urlp"}
 (c: Context) {
-    c->blob(200, "text/plain", tprintf("result: {}", c->param("urlp", u32) ?? 0))
+    c->blob(200, "text/plain", tprintf( 
+        "result: {}\nquery: {}\n",
+        c->param("urlp", u32) ?? 0
+        c->query("foo")
+    ))
+}
+
+@route.{.get, "/data", "api"}
+api_data :: (c: Context) {
+    c->json(200, &.{
+        data = .[1, 2, 3, 4, 5]
+    })
 }
 
 main :: () {
     n := Nimbus.new()
 
-    n->after(logger(style=.V2))
+    n->before(static("/static", "./static"))
 
     n->add_tagged_routes()
     n->get("/", index)
@@ -34,6 +45,16 @@ main :: () {
         <h1>This works!</h1>
         """)
     })
+
+    n->after(c => {
+        if !c->_response().commited {
+            c->blob(404, "text/plain", "Not found.")
+        }
+    })
+    n->after(logger(style=.V2))
+
+    api := n->group("/api")
+    api->add_tagged_routes(group = "api")
 
     n->serve(8080, .{ thread_count = 8, max_clients = 256 })
 }

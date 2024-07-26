@@ -18,6 +18,7 @@ _context :: struct {
     req: &Request
     res: &Response
 
+    // The stream to write the response to
     stream: &io.Stream
 }
 
@@ -72,15 +73,16 @@ Context.query :: (self: Context, query: str) -> ? str {
 }
 
 #overload
-Context.query :: (self: Context, query: str, $T: type_expr) -> ? T {
+Context.query :: (self: Context, param: str, $Query_Type: type_expr) -> ? Query_Type {
     c := cast(&_context) self
 
-    #if T == str {
-        return c.req.query[query]
-    } else {
-        return c.req.query[query]->and_then(q => conv.parse(T, q, c.allocator))
-    }
+    value := c.req.query[param]
+    value->with([v] {
+        return conv.parse_with_allocator(Query_Type, v, c.allocator)
+    })
+    return .None
 }
+
 
 Context.query_names :: (self: Context) -> [] str {
     c := cast(&_context) self
@@ -97,21 +99,22 @@ Context.cookie :: (self: Context, cookie: str) -> ? str {
 Context.param :: #match #local {}
 
 #overload
+Context.param :: (self: Context, param: str, $Param_Type: type_expr) -> ? Param_Type {
+    c := cast(&_context) self
+
+    value := c.req.params[param]
+    value->with([v] {
+        return conv.parse_with_allocator(Param_Type, v, c.allocator)
+    })
+    return .None
+}
+
+#overload
 Context.param :: (self: Context, param: str) -> ? str {
     c := cast(&_context) self
     return c.req.params[param]
 }
 
-#overload
-Context.param :: (self: Context, param: str, $T: type_expr) -> ? T {
-    c := cast(&_context) self
-
-    #if T == str {
-        return c.req.params[param]
-    } else {
-        return c.req.params[param]->and_then(q => conv.parse(T, q, c.allocator))
-    }
-}
 
 Context.param_names :: (self: Context) -> [] str {
     c := cast(&_context) self
