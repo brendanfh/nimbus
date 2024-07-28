@@ -130,6 +130,37 @@ Context.param_names :: (self: Context) -> [] str {
 }
 
 
+Context.form_value :: #match #local {}
+
+#overload
+Context.form_value :: (self: Context, key: str, $Form_Type: type_expr) -> ? Form_Type {
+    c := cast(&_context) self
+    value := self->form_value(key)?
+    return conv.parse_with_allocator(Form_Type, value, c.allocator)
+}
+
+#overload
+Context.form_value :: (self: Context, key: str) -> ? str {
+    c := cast(&_context) self
+    body := request_get_body(c.req)
+
+    form := body.Form?
+    return form[key]?[0]
+}
+
+
+Context.json_raw :: (self: Context) -> ? json.Value {
+    c := cast(&_context) self
+    body := request_get_body(c.req)
+    return body.Json?.root
+}
+
+Context.json_as :: (self: Context, $T: type_expr) -> ? T {
+    val := self->json_raw()?
+    return json.as_any(val, T)
+}
+
+
 //
 // Response methods
 //
@@ -227,6 +258,16 @@ Context.set :: (self: Context, key: str, v: any) {
     )
 }
 
+
+Context.unwrap :: macro (self: Context, value: ? $T, status: u32) -> T {
+    switch value {
+        case .Some as v do return v
+        case .None {
+            self->blob(status, "text/plain", "Unwrapped empty Optional.")
+            return #from_proc
+        }
+    }
+}
 
 
 

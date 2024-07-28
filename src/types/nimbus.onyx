@@ -107,6 +107,13 @@ Nimbus.serve :: (self: &#Self, port: u32, settings := TCP_Settings.{}) -> Serve_
     tcp_server := tcp_server_make(self.allocator, pipeline, settings)
     tcp_server.nimbus = self
 
+    logf(.Info, "    _   ___           __              ")
+    logf(.Info, "   / | / (_)___ ___  / /_  __  _______")
+    logf(.Info, "  /  |/ / / __ `__ \/ __ \/ / / / ___/")
+    logf(.Info, " / /|  / / / / / / / /_/ / /_/ (__  ) ")
+    logf(.Info, "/_/ |_/_/_/ /_/ /_/_.___/\__,_/____/  ")
+    logf(.Info, "")
+
     return tcp_server->serve(port)
 }
 

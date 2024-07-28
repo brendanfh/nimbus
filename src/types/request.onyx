@@ -47,6 +47,8 @@ request_free :: (req: &Request) {
     delete(&req.query)
     delete(&req.cookies)
     delete(&req.params)
+
+    // TODO: free the parsed body
 }
 
 #package

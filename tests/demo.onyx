@@ -31,6 +31,22 @@ api_data :: (c: Context) {
     })
 }
 
+@route.{.post, "/post_test"}
+(c: Context) {
+    s := c->form_value("test")
+    i := c->form_value("value", i32)
+
+    c->blob(200, "text/plain", tprintf("String: {}\nValue: {}\n", s, i))
+}
+
+@route.{.post, "/json_test"}
+(c: Context) {
+    v := c->json_as(struct { x, y: i32 })
+        |> c->unwrap(400)
+
+    c->blob(200, "text/plain", tprintf("X: {}\nY: {}\n", v.x, v.y))
+}
+
 main :: () {
     n := Nimbus.new()
 
