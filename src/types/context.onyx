@@ -1,6 +1,7 @@
 package nimbus
 
 use core.encoding.json
+use core.memory
 use core.misc
 
 
@@ -159,6 +160,76 @@ Context.json_raw :: (self: Context) -> ? json.Value {
 Context.json_as :: (self: Context, $T: type_expr) -> ? T {
     val := self->json_raw()?
     return json.as_any(val, T)
+}
+
+
+Context.bind :: #match #local {}
+
+#overload
+Context.bind :: macro (self: Context, $T: type_expr) -> T {
+    t: T
+    self->bind(&t)
+    return t
+}
+
+#overload
+Context.bind :: (self: Context, out: any) {
+    out2 := misc.any_dereference(out)
+
+    dest := out2.data
+    T    := out2.type
+
+    type_info := T->info()->as_struct()
+    if type_info.kind != .Struct {
+        return
+    }
+
+    for &member in type_info.members {
+        lookup_opt := member.tags
+            |> Slice.find_opt([x](x.type == str))
+            |> Optional.transform(x => *misc.any_as(x, str))
+
+        if !lookup_opt do continue
+
+        lookup := lookup_opt!
+        kind, identifier := str.bisect(lookup, ':')
+
+        switch kind {
+            case "json" {
+                // TODO: Add support for JSON Path searches ($.foo[0].bar)
+                j := self->json_raw() ?? [] { continue }
+                json.as_any(j->get(identifier), member.type, memory.ptr_add(dest, member.offset))
+            }
+
+            case "header" {
+                value := self->header(identifier) ?? [] { continue }
+                extract_var(memory.ptr_add(dest, member.offset), member.type, value)
+            }
+
+            case "query" {
+                value := self->query(identifier) ?? [] { continue }
+                extract_var(memory.ptr_add(dest, member.offset), member.type, value)
+            }
+
+            case "cookie" {
+                value := self->cookie(identifier) ?? [] { continue }
+                extract_var(memory.ptr_add(dest, member.offset), member.type, value)
+            }
+
+            case "form" {
+                value := self->form_value(identifier) ?? [] { continue }
+                extract_var(memory.ptr_add(dest, member.offset), member.type, value)
+            }
+        }
+    }
+
+    extract_var :: (dest: rawptr, type: type_expr, value: str) {
+        if type == str {
+            *cast(& str) dest = value
+        } else {
+            conv.parse_any(dest, type, value)
+        }
+    }
 }
 
 

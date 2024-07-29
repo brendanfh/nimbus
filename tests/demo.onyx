@@ -56,11 +56,33 @@ api_data :: (c: Context) {
     for 10 {
         w->write_format("i: {}\n", it)
         c->flush()
-
-        use core.os
-        os.sleep(200)
     }
 }
+
+@route.{.post, "/binding"}
+(c: Context) {
+    vars := c->bind(struct {
+        @"form:anything"
+        name: str
+
+        @"json:numbers"
+        nums: [] i32
+
+        @"query:age"
+        age: u32
+
+        @"header:content-type"
+        type: str
+
+        @"cookie:C"
+        cookie: str
+    })
+
+    logf(.Info, "Variables: {}", vars)
+
+    c->blob(200, "text/plain", tprintf("Hello {}!\n", vars.name))
+}
+
 
 main :: () {
     n := Nimbus.new()
