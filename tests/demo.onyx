@@ -59,23 +59,15 @@ api_data :: (c: Context) {
     }
 }
 
-@route.{.post, "/binding"}
+@route.{.post, "/binding/:param_value"}
 (c: Context) {
     vars := c->bind(struct {
-        @"form:anything"
-        name: str
-
-        @"json:numbers"
-        nums: [] i32
-
-        @"query:age"
-        age: u32
-
-        @"header:content-type"
-        type: str
-
-        @"cookie:C"
-        cookie: str
+        @"form:anything"       name: str
+        @"json:numbers"        nums: [] i32
+        @"query:age"           age: u32
+        @"header:content-type" type: str
+        @"cookie:C"            cookie: str
+        @"param:param_value"   param: str
     })
 
     logf(.Info, "Variables: {}", vars)

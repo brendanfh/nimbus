@@ -220,6 +220,11 @@ Context.bind :: (self: Context, out: any) {
                 value := self->form_value(identifier) ?? [] { continue }
                 extract_var(memory.ptr_add(dest, member.offset), member.type, value)
             }
+
+            case "param" {
+                value := self->param(identifier) ?? [] { continue }
+                extract_var(memory.ptr_add(dest, member.offset), member.type, value)
+            }
         }
     }
 
