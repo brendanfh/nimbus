@@ -17,6 +17,9 @@ cgi :: (nimbus: &Nimbus, p: Pipeline, stream: &io.Stream) {
 
     pipe := p
     pipe->process(cast(Context) &c)
+    
+    destroy_context(&c)
+    response_end(&res, stream)
 }
 
 #package

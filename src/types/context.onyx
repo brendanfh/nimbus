@@ -42,6 +42,7 @@ make_context :: (
 
 #package
 destroy_context :: (c: &_context) {
+    Context.flush(~~ c)
     delete(&c.variables)
 }
 
@@ -182,6 +183,13 @@ Context.set_cookie :: (self: Context, name: str, value: str) {
     c.res.cookies->put(name, value)
 }
 
+Context.write_headers :: (self: Context, code: u32) {
+    c := cast(&_context) self
+    c.res.status = code
+    c.res.chunked = true
+    response_write_headers(c.res, c.stream)
+}
+
 Context.no_content :: (self: Context, code: u32) {
     c := cast(&_context) self
     c.res.status = code
@@ -238,6 +246,16 @@ Context.file :: (self: Context, code: u32, mimetype: str, path: str) {
     context.allocator = c.allocator
 
     self->blob(code, mimetype, os.get_contents(path))
+}
+
+Context.writer :: (self: Context) -> &io.Writer {
+    c := cast(&_context) self
+    return &c.res.writer
+}
+
+Context.flush :: (self: Context) {
+    c := cast(&_context) self
+    response_flush_body(c.res, c.stream)
 }
 
 

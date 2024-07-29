@@ -4,6 +4,7 @@ use runtime
 use core.encoding.json
 use core.memory
 use core.net
+use core { tprintf }
 
 Request :: struct {
     method: HTTP_Method
@@ -72,13 +73,11 @@ request_get_body :: (req: &Request) -> &Request_Body {
         }
     }
 
-    elseif str.starts_with(content_type, "application/x-www-form-urlencoded")
-    {
+    elseif str.starts_with(content_type, "application/x-www-form-urlencoded") {
         body = .{ Form = request_parse_form_urlencoded(req) }
     }
     
-    elseif str.starts_with(content_type, "multipart/form-data")
-    {
+    elseif str.starts_with(content_type, "multipart/form-data") {
         switch request_parse_multipart_form(req) {
             case .None do logf(.Warning, "Failed to read multipart/form-data")
             case .Some as data {
@@ -87,8 +86,7 @@ request_get_body :: (req: &Request) -> &Request_Body {
         }
     }
 
-    else
-    {
+    else {
         body = .{ Raw = request_parse_raw(req) }
     }
     
@@ -100,8 +98,34 @@ request_get_body :: (req: &Request) -> &Request_Body {
 request_parse_raw :: (req: &Request) -> str {
     req.headers->get("transfer-encoding")->with([encoding] {
         if encoding == "chunked" {
-            panic("TODO: handle chunked body")
+            out := make([..] u8)
+
+            while true {
+                len := req.body_reader->read_u32()
+                req.body_reader->advance_line()
+
+                if len == 0 {
+                    req.body_reader->advance_line()
+                    break
+                }
+
+                out->ensure_capacity(out.length + len)
+                buf := out[out.length .. out.length + len]
+
+                index := 0
+                while index < len {
+                    read, err := req.body_reader->read_bytes(buf[index .. len])
+                    index += read
+                }
+
+                out.length += len
+            }
+
+            req._body_was_read = true
+            return out
         }
+        
+        panic(tprintf("Unhandled transfer encoding: {}", encoding))
     })
 
     req.headers->get("content-length")->and_then(x => conv.parse(u32, x))->with([content_length] {

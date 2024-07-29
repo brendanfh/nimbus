@@ -63,7 +63,7 @@ TCP_Server.serve :: (tcp: &TCP_Server, port: u32) -> Serve_Status {
         return .Failed_To_Bind
     }
 
-    log(.Info, "Nimbus", core.tprintf("Serving on port {}", port))
+    logf(.Info, "Serving on port {}", port)
     tcp.server->handle_events() {
         case .Ready {
             ready_client := cast(&core.net.TCP_Event.Ready, it.data).client
@@ -157,10 +157,12 @@ inner_handle_request :: (tcp: &TCP_Server, client: &net.TCP_Server.Client) -> bo
         defer response_free(&res)
 
         c := make_context(tcp.nimbus, &req, &res, &client_sock, context.allocator)
-        defer destroy_context(&c)
 
         // Process the request!
         tcp.pipeline->process(~~ &c)
+
+        destroy_context(&c)
+        response_end(&res, &client_sock)
 
         // If the body was not read for some reason,
         // we need to read it before we can read the next request.

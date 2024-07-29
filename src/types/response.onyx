@@ -109,10 +109,14 @@ Response :: struct {
                 remaining -= to_send
             }
 
-            io.write(&w, "0\r\n\r\n")
-
         } else {
             io.write(&w, contents)
+        }
+    }
+
+    response_end :: (res: &Response, s: &io.Stream) {
+        if res.chunked {
+            io.stream_write(s, "0\r\n\r\n")
         }
     }
 

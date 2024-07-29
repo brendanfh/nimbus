@@ -1,7 +1,7 @@
 package nimbus
 
 use core {
-    stdio
+    stdio, println
 }
 
 
@@ -50,7 +50,6 @@ Nimbus.delete  :: (self: &#Self, path: str, handler: HTTP_Handler) { self->add(.
 Nimbus.connect :: (self: &#Self, path: str, handler: HTTP_Handler) { self->add(.CONNECT, path, handler) }
 Nimbus.options :: (self: &#Self, path: str, handler: HTTP_Handler) { self->add(.OPTIONS, path, handler) }
 Nimbus.head    :: (self: &#Self, path: str, handler: HTTP_Handler) { self->add(.HEAD, path, handler) }
-
 
 
 Nimbus.before :: #match #local {}
@@ -107,12 +106,12 @@ Nimbus.serve :: (self: &#Self, port: u32, settings := TCP_Settings.{}) -> Serve_
     tcp_server := tcp_server_make(self.allocator, pipeline, settings)
     tcp_server.nimbus = self
 
-    logf(.Info, "    _   ___           __              ")
-    logf(.Info, "   / | / (_)___ ___  / /_  __  _______")
-    logf(.Info, "  /  |/ / / __ `__ \/ __ \/ / / / ___/")
-    logf(.Info, " / /|  / / / / / / / /_/ / /_/ (__  ) ")
-    logf(.Info, "/_/ |_/_/_/ /_/ /_/_.___/\__,_/____/  ")
-    logf(.Info, "")
+    println("      _   ___           __              ")
+    println("     / | / (_)___ ___  / /_  __  _______")
+    println("    /  |/ / / __ `__ \\/ __ \\/ / / / ___/")
+    println("   / /|  / / / / / / / /_/ / /_/ (__  ) ")
+    println("  /_/ |_/_/_/ /_/ /_/_.___/\__,_/____/  ")
+    println("")
 
     return tcp_server->serve(port)
 }

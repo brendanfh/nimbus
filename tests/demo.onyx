@@ -41,10 +41,25 @@ api_data :: (c: Context) {
 
 @route.{.post, "/json_test"}
 (c: Context) {
-    v := c->json_as(struct { x, y: i32 })
+    v := struct { x, y: i32 }
+        |> c->json_as()
         |> c->unwrap(400)
 
     c->blob(200, "text/plain", tprintf("X: {}\nY: {}\n", v.x, v.y))
+}
+
+@route.{.get, "/streaming"}
+(c: Context) {
+    c->write_headers(200)
+    
+    w := c->writer()
+    for 10 {
+        w->write_format("i: {}\n", it)
+        c->flush()
+
+        use core.os
+        os.sleep(200)
+    }
 }
 
 main :: () {
