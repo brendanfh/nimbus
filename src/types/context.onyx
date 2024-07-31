@@ -21,30 +21,40 @@ _context :: struct {
     stream: &io.Stream
 
     variables: Map(str, any)
+
+    steps: [..] struct {
+        steps: &[..] Step
+        idx: i32
+    }
 }
 
 #package
-make_context :: (
-    nimbus: &Nimbus,
-    req: &Request,
-    res: &Response,
-    stream: &io.Stream,
-    allocator: Allocator
-) -> _context {
-    return .{
-        nimbus,
-        allocator,
-        req,
-        res,
-        stream,
-        make(Map(str, any), nimbus.allocator)
-    }
+make_context :: (nimbus: &Nimbus, stream: &io.Stream, allocator: Allocator) -> (c: _context) {
+    c.req = new(Request, allocator)
+
+    c.res = new(Response, allocator)
+    response_init(c.res)
+
+    c.variables = make(Map(str, any), allocator)
+    Array.init(&c.steps, 8, allocator)
+
+    c.stream = stream
+    c.nimbus = nimbus
+    c.allocator = allocator
+
+    return
 }
 
 #package
 destroy_context :: (c: &_context) {
     Context.flush(~~ c)
     delete(&c.variables)
+    delete(&c.steps)
+
+    response_end(c.res, c.stream)
+
+    response_free(c.res)
+    request_free(c.req)
 }
 
 
@@ -359,6 +369,31 @@ Context.unwrap :: macro (self: Context, value: ? $T, status: u32) -> T {
         case .None {
             self->blob(status, "text/plain", "Unwrapped empty Optional.")
             return #from_proc
+        }
+    }
+}
+
+
+Context.next :: (self: Context) {
+    c := cast(&_context) self
+
+    current_step := c.steps->get_ptr(-1)
+
+    current_step.idx += 1
+    defer current_step.idx -= 1
+
+    if current_step.idx > current_step.steps.length {
+        logf(.Warning, "Unable to move to next step as this is the last step.")
+        return
+    }
+
+    switch current_step.steps.*[current_step.idx - 1] {
+        case .WithData as h {
+            h.func(h.data, self)
+        }
+
+        case .NoData as h {
+            h(self)
         }
     }
 }

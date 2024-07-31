@@ -7,12 +7,10 @@ TCP_Server :: struct {
     nimbus: &Nimbus
 
     server: &net.TCP_Server
-    pipeline: Pipeline
 
     thread_pool: [] thread.Thread
 
     ready_clients: sync.Channel(&net.TCP_Server.Client)
-
     max_clients: i32
 }
 
@@ -22,14 +20,14 @@ TCP_Settings :: struct {
 }
 
 #package
-tcp_server_make :: (allocator: Allocator, pipeline: Pipeline, settings: TCP_Settings) -> &TCP_Server {
-    threads := make([] thread.Thread, settings.thread_count)
+tcp_server_make :: (nimbus: &Nimbus, settings: TCP_Settings) -> &TCP_Server {
+    threads := make([] thread.Thread, settings.thread_count, nimbus.allocator)
 
     server := new(TCP_Server.{
-        pipeline = pipeline,
+        nimbus = nimbus
         thread_pool = threads,
         max_clients = settings.max_clients
-    }, allocator)
+    }, nimbus.allocator)
 
     server.ready_clients = sync.Channel.make(&net.TCP_Server.Client)
 
@@ -142,38 +140,31 @@ inner_handle_request :: (tcp: &TCP_Server, client: &net.TCP_Server.Client) -> bo
     while defer io.reader_get_buffered(&reader) > 0 {
         defer alloc.clear_temp_allocator()
 
-        req := Request.{
-            client  = client,
-            address = .{ client_addr->addr_as_str() }
-        }
-        defer request_free(&req)
+        c := make_context(tcp.nimbus, &client_sock, context.allocator)
 
-        if !parse_request(&req, &reader) {
+        req := c.req
+        req.client = client
+        req.address = .{ client_addr->addr_as_str() }
+
+        if !parse_request(req, &reader) {
             return false
         }
 
-        res: Response
-        response_init(&res)
-        defer response_free(&res)
-
-        c := make_context(tcp.nimbus, &req, &res, &client_sock, context.allocator)
-
         // Process the request!
-        tcp.pipeline->process(~~ &c)
-
-        destroy_context(&c)
-        response_end(&res, &client_sock)
+        process_request(tcp.nimbus, ~~ &c)
 
         // If the body was not read for some reason,
         // we need to read it before we can read the next request.
         if !req._body_was_read {
-            request_parse_raw(&req)
+            request_parse_raw(req)
         }
+
+        destroy_context(&c)
 
         // When switching protocols, just bail here.
         // In theory the reader should be empty anyway,
         // but just break to be safe.
-        if res.status == 101 {
+        if c.res.status == 101 {
             break
         }
     }
@@ -203,7 +194,7 @@ parse_request :: (req: &Request, r: &io.Reader) -> bool {
     query_params: _
     req.endpoint, query_params = str.bisect(route, '?')
 
-    req._processed_endpoint = process_url_to_route_elems(req.endpoint)
+    req._processed_endpoint = process_url_to_route_elems(req.endpoint, context.allocator)
 
     parse_url_encoded_key_value(&req.query, &query_params)
 

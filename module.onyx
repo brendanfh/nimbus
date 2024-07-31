@@ -27,4 +27,6 @@ use runtime
 #load_all "./src"
 #load_all "./src/types"
 #load_all "./src/pipes"
+#load_all "./src/internal"
+#load_all "./src/utils"
 #load "./src/hosting/cgi"

@@ -2,13 +2,19 @@ package nimbus
 
 use core {tprintf}
 
-cors :: struct {
+CORS :: struct {
     allowed_origins: [] str
-    max_age := 86400
+    max_age: u32
+}
+
+cors :: (origins: [] str, age := 86400) -> (c: CORS) {
+    c.allowed_origins = origins
+    c.max_age = age
+    return
 }
 
 #local
-cors_handler :: (c: &cors, ctx: Context) {
+cors_handler :: (c: &CORS, ctx: Context) {
     origins := str.join(c.allowed_origins, ", ") if c.allowed_origins else "*"
 
     ctx->set_header("Access-Control-Allow-Origin", origins)
@@ -21,9 +27,12 @@ cors_handler :: (c: &cors, ctx: Context) {
 
         ctx->set_header("Access-Control-Max-Age", tprintf("{}", c.max_age))
         ctx->no_content(204)
+
+    } else {
+        ctx->next()
     }
 }
 
 #overload
-Pipeable.as_pipe :: (c: &cors) => Pipe.{cors_handler, c}
+ToMiddleware.convert :: macro (c: &CORS) => Middleware.{ cors_handler, c }
 

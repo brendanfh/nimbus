@@ -79,7 +79,15 @@ api_data :: (c: Context) {
 main :: () {
     n := Nimbus.new()
 
-    n->before(static("/static", "./static"))
+    n->add(logger(style=.V2))
+    n->add(static("/static", "./static"))
+    n->add(c => {
+        c->next()
+
+        if !c->_response().commited {
+            c->blob(404, "text/plain", "Not found.")
+        }
+    })
 
     n->add_tagged_routes()
     n->get("/", index)
@@ -91,15 +99,8 @@ main :: () {
         """)
     })
 
-    n->after(c => {
-        if !c->_response().commited {
-            c->blob(404, "text/plain", "Not found.")
-        }
-    })
-    n->after(logger(style=.V2))
-
     api := n->group("/api")
     api->add_tagged_routes(group = "api")
 
-    n->serve(8080, .{ thread_count = 8, max_clients = 256 })
+    n->serve(8080, .{ thread_count = 0, max_clients = 128 })
 }

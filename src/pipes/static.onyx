@@ -5,8 +5,6 @@ Static_File_Router :: struct {
     base_route: str
     base_path:  str
     cache_duration: u32
-
-    handle :: static_file_router_handle 
 }
 
 static :: (route, path: str, cache_duration := 3600) -> Static_File_Router {
@@ -17,7 +15,10 @@ static :: (route, path: str, cache_duration := 3600) -> Static_File_Router {
 static_file_router_handle :: (sf: &Static_File_Router, c: Context) {
     path := c->path()
 
-    if !str.starts_with(path, sf.base_route) do return
+    if !str.starts_with(path, sf.base_route) {
+        c->next()
+        return
+    }
 
     file_path := path[sf.base_route.count .. path.count]
     full_path := core.tprintf("{}{}", sf.base_path, file_path)
@@ -36,4 +37,4 @@ static_file_router_handle :: (sf: &Static_File_Router, c: Context) {
 }
 
 #overload
-Pipeable.as_pipe :: macro (sf: &Static_File_Router) => Pipe.{ sf.handle, sf }
+ToMiddleware.convert :: macro (sf: &Static_File_Router) => Middleware.{ static_file_router_handle, sf }

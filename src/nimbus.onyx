@@ -1,0 +1,205 @@
+package nimbus
+
+use core { stdio, println, tprintf }
+use runtime
+
+
+Handler :: #type (Context) -> void
+
+Middleware :: struct {
+    func: (rawptr, Context) -> void
+    data: rawptr
+}
+
+
+/// The core `Nimbus` structure.
+///
+/// Contains all state of the current Nimbus server.
+Nimbus :: struct {
+    allocator: Allocator
+
+    steps:  [..] Step
+    routes: [..] Route
+
+    _router_is_in_steps: bool
+}
+
+
+Nimbus.new :: (allocator := context.allocator) -> #Self {
+    return .{
+        allocator = allocator
+        routes    = make([..] Route, allocator)
+        steps     = make([..] Step,  allocator)
+    }
+}
+
+Nimbus.route :: (self: &#Self, method: HTTP_Method, path: str, handler: Handler) {
+    steps := make([..] Step, self.allocator)
+    steps->push(.{ NoData = handler })
+
+    self.routes << Route.{
+        method = method,
+        steps = steps,
+        elems = process_url_to_route_elems(path, self.allocator),
+        match_all = true,
+    }
+
+    sort_routes(self)
+}
+
+///
+/// Searches in the specified package for procedures tagged with `route`
+Nimbus.add_tagged_routes :: (self: &#Self, pack := builtin.any_package, group := "") {
+    procs := runtime.info.get_procedures_with_tag(route)
+    for procs {
+        if pack != any_package && pack != it.pack do continue
+        if group != it.tag.group do continue
+
+        steps := make([..] Step, self.allocator)
+        for tag in runtime.info.get_tags_for_procedure(it.func) {
+            if tag.type == middleware {
+                mw := cast(&middleware) tag.data
+                steps->push(.{ NoData = mw.func })
+            }
+        }
+
+        steps->push(.{ NoData = *cast(&Handler) &it.func })
+
+        for tag in runtime.info.get_tags_for_procedure(it.func) {
+            if tag.type == route {
+                r := cast(&route) tag.data
+                self.routes << Route.{
+                    method = r.method,
+                    steps = steps,
+                    elems = process_url_to_route_elems(r.route, self.allocator),
+                    match_all = true,
+                }
+            }
+        }
+    }
+}
+
+
+//
+// Helper procedures to quickly add certain kinds of requests
+//
+
+Nimbus.get     :: (self: &#Self, path: str, handler: Handler) { self->route(.GET, path, handler) }
+Nimbus.post    :: (self: &#Self, path: str, handler: Handler) { self->route(.POST, path, handler) }
+Nimbus.put     :: (self: &#Self, path: str, handler: Handler) { self->route(.PUT, path, handler) }
+Nimbus.patch   :: (self: &#Self, path: str, handler: Handler) { self->route(.PATCH, path, handler) }
+Nimbus.delete  :: (self: &#Self, path: str, handler: Handler) { self->route(.DELETE, path, handler) }
+Nimbus.connect :: (self: &#Self, path: str, handler: Handler) { self->route(.CONNECT, path, handler) }
+Nimbus.options :: (self: &#Self, path: str, handler: Handler) { self->route(.OPTIONS, path, handler) }
+Nimbus.head    :: (self: &#Self, path: str, handler: Handler) { self->route(.HEAD, path, handler) }
+
+
+Nimbus.add :: #match #local {}
+
+#overload
+Nimbus.add :: (self: &Nimbus, m: Handler) {
+    self.steps->push(.{ NoData = m })
+}
+
+#overload
+Nimbus.add :: (self: &Nimbus, m: Middleware) {
+    self.steps->push(.{ WithData = m })
+}
+
+#overload
+Nimbus.add :: (self: &Nimbus, m: $T) where ToMiddleware(&T) {
+    self.steps->push(.{
+        WithData = new(m, self.allocator)
+                |> ToMiddleware.convert()
+    })
+}
+
+
+Nimbus.group :: (self: &Nimbus, prefix: str) -> &Nimbus {
+    group := new(Nimbus.new(self.allocator), self.allocator)
+
+    steps := make([..] Step, self.allocator)
+    steps->push(.{ WithData = .{ process_request, group } })
+
+    self.routes << Route.{
+        method = .ALL,
+        steps = steps,
+        elems = process_url_to_route_elems(prefix, self.allocator),
+        match_all = false
+    }
+
+    return group
+}
+
+
+//
+// Request serving methods
+//
+
+Nimbus.serve :: (self: &#Self, port: u32, settings := TCP_Settings.{}) -> Serve_Status {
+    println("      _   ___           __              ")
+    println("     / | / (_)___ ___  / /_  __  _______")
+    println("    /  |/ / / __ `__ \\/ __ \\/ / / / ___/")
+    println("   / /|  / / / / / / / /_/ / /_/ (__  ) ")
+    println("  /_/ |_/_/_/ /_/ /_/_.___/\__,_/____/  ")
+    println("")
+
+    tcp_server := tcp_server_make(self, settings)
+    return tcp_server->serve(port)
+}
+
+Nimbus.cgi :: (self: &#Self, stream := &stdio.stream) {
+    cgi(self, stream)
+}
+
+
+
+
+
+ToMiddleware :: interface (T: type_expr) {
+    t as T
+
+    { convert(t) } -> Middleware
+
+    convert :: #match {}
+}
+
+#package {
+    Step :: union {
+        WithData: Middleware
+        NoData:   Handler
+    }
+
+    Route :: struct {
+        method:  HTTP_Method
+        elems: [] Elem
+        steps: [..] Step
+        
+        match_all: bool
+
+        Elem :: union {
+            Fixed: str
+            Variable: str
+        }
+    }
+
+    process_request :: (n: &Nimbus, c: Context) {
+        if !n._router_is_in_steps {
+            n.steps->push(.{ WithData = .{ route_request, n } })
+        }
+
+        run_steps(~~ c, ~~ &n.steps)
+    }
+
+    run_steps :: (c: &_context, steps: &[..] Step) {
+        c.steps->push(.{
+            steps = steps,
+            idx   = 0        
+        })
+
+        Context.next(~~ c)
+
+        c.steps->pop()
+    }
+}
+

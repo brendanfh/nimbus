@@ -1,0 +1,135 @@
+package nimbus
+
+use core { tprintf }
+
+
+#package
+route_request :: (n: &Nimbus, c: Context) {
+    req := c->request()
+
+    use tmp_url_params: [..] struct { name, value: str }
+    
+    for& n.routes {
+        if it.method != .ALL && it.method != req.method do continue
+        Array.clear(&tmp_url_params)
+
+        matched_parts := pattern_match_routes(it.elems, req._processed_endpoint, &tmp_url_params).Matched
+        if !matched_parts do continue
+
+        if it.match_all && matched_parts->unwrap() != req._processed_endpoint.length {
+            // If we have to match the entire rest of the route, and we didn't, skip this one.
+            continue
+        }
+
+        for tmp_url_params do req.params[it.name] = it.value
+        req._processed_endpoint = req._processed_endpoint[matched_parts? .. req._processed_endpoint.length]
+
+        run_steps(cast(&_context) c, &it.steps)
+
+        // Should this really return here?
+        // What if the matched route is a subrouter that fails, but
+        // another route would later match better?
+        return
+    }
+}
+
+#package
+sort_routes :: (nimbus: &Nimbus) {
+    Slice.sort(nimbus.routes, (a, b) => {
+        for i in core.math.min(a.elems.count, b.elems.count) {
+            left := a.elems[i]
+            right := b.elems[i]
+
+            // Different: fixed first
+            if left.tag != right.tag {
+                return 1 if right.tag == .Fixed else -1
+            }
+
+            // Same and fixed: longer string first
+            if left.tag == .Fixed {
+                s1 := left.Fixed?
+                s2 := right.Fixed?
+
+                // Same, fixed, and same string, continue
+                if s1 == s2 {
+                    continue
+                }
+
+                return s2.count - s1.count
+            }
+
+            // Same and variable: continue
+        }
+
+        return b.elems.count - a.elems.count
+    })
+}
+
+#local
+PatternMatchResult :: union {
+    NoMatch: void
+    Matched: i32
+}
+
+#local
+pattern_match_routes :: (expected: [] Route.Elem, actual: [] Route.Elem, variables: &$T) -> PatternMatchResult {
+    matched_count := 0
+    for iter.zip(
+        iter.as_iter(expected),
+        iter.as_iter(actual))
+    {
+        if it.second.tag == .Variable {
+            // Variables are illegal in provided `actual`
+            return .{ NoMatch = .{} }
+        }
+
+        provided_pattern := it.second.Fixed?
+
+        switch it.first {
+            case .Fixed as expected_pattern {
+                if expected_pattern != provided_pattern do return .{ NoMatch = .{} }
+            }
+
+            case .Variable as variable_name {
+                Array.push(variables, .{ variable_name, provided_pattern })
+            }
+        }
+
+        matched_count += 1
+    }
+
+    if expected.count == 0 && actual.count != 0 {
+        return .{ NoMatch = .{} }
+    }
+
+    if matched_count != expected.count {
+        return .{ NoMatch = .{} }
+    }
+
+    return .{ Matched = matched_count }
+}
+
+#package
+process_url_to_route_elems :: (s: str, allocator: Allocator) -> [] Route.Elem {
+    if s == "/" do return .{}
+
+    if s[0] != '/' {
+        log(.Warning, "Nimbus", tprintf("Poorly formatted route: {}", s))
+        return .{}
+    }
+
+    elem_count := Slice.count_where(s, [c](c == '/'))
+    elems := make([..] Route.Elem, elem_count, allocator)
+
+    for str.split_iter(s, '/')->skip(1) {
+        pattern := it
+        if it[0] == ':' {
+            str.advance(&pattern)
+            elems << .{ Variable = pattern }
+        } else {
+            elems << .{ Fixed = pattern }
+        }
+    }
+
+    return elems
+}

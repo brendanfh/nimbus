@@ -5,21 +5,14 @@ use core.os
 use core { stdio }
 
 #package
-cgi :: (nimbus: &Nimbus, p: Pipeline, stream: &io.Stream) {
-    req := make_request_from_env(stream)
-    defer request_free(&req)
+cgi :: (nimbus: &Nimbus, stream: &io.Stream) {
+    c := make_context(nimbus, stream, nimbus.allocator)
 
-    res: Response
-    response_init(&res)
-    defer response_free(&res)
+    *c.req = make_request_from_env(stream)
 
-    c := make_context(nimbus, &req, &res, stream, nimbus.allocator)
-
-    pipe := p
-    pipe->process(cast(Context) &c)
+    process_request(nimbus, ~~ &c)
     
     destroy_context(&c)
-    response_end(&res, stream)
 }
 
 #package
@@ -30,7 +23,7 @@ make_request_from_env :: (stream: &io.Stream) -> Request {
 
     req.method = info.enum_value(typeof req.method, env["REQUEST_METHOD"] ?? "")
     req.endpoint = env->get("PATH_TRANSLATED") ?? (env->get("PATH_INFO") ?? "")
-    req._processed_endpoint = process_url_to_route_elems(req.endpoint)
+    req._processed_endpoint = process_url_to_route_elems(req.endpoint, context.allocator)
 
     req.address.ip = env["REMOTE_ADDR"] ?? ""
 

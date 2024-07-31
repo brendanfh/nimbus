@@ -1,0 +1,12 @@
+package nimbus
+
+
+route :: struct {
+    method: HTTP_Method
+    route:  str
+    group:  str
+}
+
+middleware :: struct {
+    func: Handler
+}

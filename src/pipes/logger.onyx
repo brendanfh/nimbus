@@ -23,6 +23,8 @@ logger :: (s: &io.Stream = &core.stdio.stream, style := LoggerStyle.V1) -> Logge
 
 #package
 logger_log_request :: (l: &Logger, c: Context) {
+    c->next()
+
     req := c->request()
     res := c->_response()
 
@@ -48,7 +50,7 @@ logger_log_request :: (l: &Logger, c: Context) {
 
             io.write_format(
                 &l.writer,
-                "{}: [\e[1;{}m{}\e[0m] \e[1;94m{} {}\e[0m  host: '{}' client: '{}'\n",
+                "\e[37m[thread {}]\e[0m [\e[1;{}m{}\e[0m] \e[1;94m{} {}\e[0m  host: '{}' client: '{}'\n",
                 context.thread_id,
                 status_color,
                 res.status,
@@ -65,8 +67,4 @@ logger_log_request :: (l: &Logger, c: Context) {
 }
 
 #overload
-Pipeable.as_pipe :: macro (l: &Logger) => Pipe.{
-    logger_log_request,
-    l,
-    after_commited = true,
-}
+ToMiddleware.convert :: macro (l: &Logger) => Middleware.{ logger_log_request, l }
