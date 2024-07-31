@@ -11,7 +11,7 @@ static :: (route, path: str, cache_duration := 3600) -> Static_File_Router {
     return .{ route, path, cache_duration } 
 }
 
-#package
+#local
 static_file_router_handle :: (sf: &Static_File_Router, c: Context) {
     path := c->path()
 

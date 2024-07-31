@@ -25,6 +25,7 @@ Nimbus :: struct {
 }
 
 
+/// Creates and initializes a new instance of `Nimbus`.
 Nimbus.new :: (allocator := context.allocator) -> #Self {
     return .{
         allocator = allocator
@@ -33,6 +34,7 @@ Nimbus.new :: (allocator := context.allocator) -> #Self {
     }
 }
 
+/// Binds a new route for a given method and path to a given handler.
 Nimbus.route :: (self: &#Self, method: HTTP_Method, path: str, handler: Handler) {
     steps := make([..] Step, self.allocator)
     steps->push(.{ NoData = handler })
@@ -47,7 +49,6 @@ Nimbus.route :: (self: &#Self, method: HTTP_Method, path: str, handler: Handler)
     sort_routes(self)
 }
 
-///
 /// Searches in the specified package for procedures tagged with `route`
 Nimbus.add_tagged_routes :: (self: &#Self, pack := builtin.any_package, group := "") {
     procs := runtime.info.get_procedures_with_tag(route)
@@ -94,6 +95,7 @@ Nimbus.options :: (self: &#Self, path: str, handler: Handler) { self->route(.OPT
 Nimbus.head    :: (self: &#Self, path: str, handler: Handler) { self->route(.HEAD, path, handler) }
 
 
+/// Attaches middleware to be run before routing the request.
 Nimbus.add :: #match #local {}
 
 #overload
@@ -115,6 +117,7 @@ Nimbus.add :: (self: &Nimbus, m: $T) where ToMiddleware(&T) {
 }
 
 
+/// Creates a new group/subrouter.
 Nimbus.group :: (self: &Nimbus, prefix: str) -> &Nimbus {
     group := new(Nimbus.new(self.allocator), self.allocator)
 
@@ -136,6 +139,7 @@ Nimbus.group :: (self: &Nimbus, prefix: str) -> &Nimbus {
 // Request serving methods
 //
 
+/// Starts a HTTP server on the given port.
 Nimbus.serve :: (self: &#Self, port: u32, settings := TCP_Settings.{}) -> Serve_Status {
     println("      _   ___           __              ")
     println("     / | / (_)___ ___  / /_  __  _______")
@@ -148,6 +152,7 @@ Nimbus.serve :: (self: &#Self, port: u32, settings := TCP_Settings.{}) -> Serve_
     return tcp_server->serve(port)
 }
 
+/// Responds to a request using the WCGI protocol.
 Nimbus.cgi :: (self: &#Self, stream := &stdio.stream) {
     cgi(self, stream)
 }
@@ -163,6 +168,7 @@ ToMiddleware :: interface (T: type_expr) {
 
     convert :: #match {}
 }
+
 
 #package {
     Step :: union {

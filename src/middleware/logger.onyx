@@ -21,7 +21,7 @@ logger :: (s: &io.Stream = &core.stdio.stream, style := LoggerStyle.V1) -> Logge
     };
 }
 
-#package
+#local
 logger_log_request :: (l: &Logger, c: Context) {
     c->next()
 

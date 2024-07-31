@@ -62,26 +62,35 @@ destroy_context :: (c: &_context) {
 // Request methods
 //
 
+/// Returns in interal request object.
+/// You will likely not need to use this as all information is accessible using other methods on `Context`.
 Context.request :: (self: Context) -> &Request {
     c := cast(&_context) self
     return c.req
 }
 
+/// Returns the path of the request.
+/// `/foo` in `bar.com/foo`
 Context.path :: (self: Context) -> str {
     c := cast(&_context) self
     return c.req.endpoint
 }
 
+/// Returns the method of the request.
 Context.method :: (self: Context) -> HTTP_Method {
     c := cast(&_context) self
     return c.req.method
 }
 
+/// Returns the value of a provided header, if present.
 Context.header :: (self: Context, header: str) -> ? str {
     c := cast(&_context) self
     return c.req.headers[header]
 }
 
+/// Returns the value of a query parameter, if present.
+/// 
+/// Provides an overload that allows for quickly converting to a different type.
 Context.query :: #match #local {}
 
 #overload
@@ -102,6 +111,7 @@ Context.query :: (self: Context, param: str, $Query_Type: type_expr) -> ? Query_
 }
 
 
+/// Returns the names of all query parameters.
 Context.query_names :: (self: Context) -> [] str {
     c := cast(&_context) self
     return iter.as_iter(&c.req.params)
@@ -109,11 +119,15 @@ Context.query_names :: (self: Context) -> [] str {
         |> iter.collect(c.allocator)
 }
 
+/// Returns the value of a cookie, if present.
 Context.cookie :: (self: Context, cookie: str) -> ? str {
     c := cast(&_context) self
     return c.req.cookies[cookie]
 }
 
+/// Returns the value of a URL parameter, if present.
+/// 
+/// Provides an overload that allows for quickly converting to a different type.
 Context.param :: #match #local {}
 
 #overload
@@ -134,6 +148,7 @@ Context.param :: (self: Context, param: str) -> ? str {
 }
 
 
+/// Returns the names of all URL parameters.
 Context.param_names :: (self: Context) -> [] str {
     c := cast(&_context) self
     return iter.as_iter(&c.req.params)
@@ -142,6 +157,9 @@ Context.param_names :: (self: Context) -> [] str {
 }
 
 
+/// Returns the value of a form parameter, if present.
+/// 
+/// Provides an overload that allows for quickly converting to a different type.
 Context.form_value :: #match #local {}
 
 #overload
@@ -161,18 +179,31 @@ Context.form_value :: (self: Context, key: str) -> ? str {
 }
 
 
+/// Returns a `json.Value` of the body of the request, if the body is present and is JSON.
 Context.json_raw :: (self: Context) -> ? json.Value {
     c := cast(&_context) self
     body := request_get_body(c.req)
     return body.Json?.root
 }
 
+/// When the body of the request is JSON, convert that JSON to a specified type.
 Context.json_as :: (self: Context, $T: type_expr) -> ? T {
     val := self->json_raw()?
     return json.as_any(val, T)
 }
 
 
+/// Extract multiple values from multiple sources into a single variable.
+///
+///     vars := c->bind(struct {
+///         @"form:name"           name: str
+///         @"json:numbers"        nums: [] i32
+///         @"query:age"           age: u32
+///         @"header:content-type" type: str
+///         @"cookie:session"      session: str
+///         @"param:param_value"   param: str
+///     })
+///
 Context.bind :: #match #local {}
 
 #overload
@@ -259,16 +290,20 @@ Context._response :: (self: Context) -> &Response {
     return c.res
 }
 
+/// Sets the value of a header for the response.
 Context.set_header :: (self: Context, header: str, value: str) {
     c := cast(&_context) self
     c.res.headers->put(header, value)
 }
 
+/// Sets the value of a cookie for the response.
 Context.set_cookie :: (self: Context, name: str, value: str) {
     c := cast(&_context) self
     c.res.cookies->put(name, value)
 }
 
+/// Writes just the headers of the response.
+/// You can then use `Context.writer` to get a `io.Writer` to write the body.
 Context.write_headers :: (self: Context, code: u32) {
     c := cast(&_context) self
     c.res.status = code
@@ -276,12 +311,14 @@ Context.write_headers :: (self: Context, code: u32) {
     response_write_headers(c.res, c.stream)
 }
 
+/// Write a response with no body.
 Context.no_content :: (self: Context, code: u32) {
     c := cast(&_context) self
     c.res.status = code
     response_write_headers(c.res, c.stream)
 }
 
+/// Write a redirection response.
 Context.redirect :: (self: Context, code: u32, uri: str) {
     c := cast(&_context) self
 
@@ -296,6 +333,7 @@ Context.redirect :: (self: Context, code: u32, uri: str) {
     response_flush_body(c.res, c.stream)
 }
 
+/// Write a blob response with a given status code and content type.
 Context.blob :: (self: Context, code: u32, mimetype: str, content: [] u8) {
     c := cast(&_context) self
 
@@ -308,6 +346,7 @@ Context.blob :: (self: Context, code: u32, mimetype: str, content: [] u8) {
     response_flush_body(c.res, c.stream)
 }
 
+/// Write a JSON response using any Onyx type.
 Context.json :: (self: Context, code: u32, data: any) {
     c := cast(&_context) self
 
@@ -321,10 +360,12 @@ Context.json :: (self: Context, code: u32, data: any) {
     response_flush_body(c.res, c.stream)
 }
 
+/// Write an HTML response with a status code.
 Context.html :: (self: Context, code: u32, html: str) {
     self->blob(code, "text/html", html)
 }
 
+/// Write a response from the contents of a file with a status code and content type.
 Context.file :: (self: Context, code: u32, mimetype: str, path: str) {
     push_context()
 
@@ -334,11 +375,13 @@ Context.file :: (self: Context, code: u32, mimetype: str, path: str) {
     self->blob(code, mimetype, os.get_contents(path))
 }
 
+/// Returns the internal writer to the response body.
 Context.writer :: (self: Context) -> &io.Writer {
     c := cast(&_context) self
     return &c.res.writer
 }
 
+/// Sends the contents stored in the response writer.
 Context.flush :: (self: Context) {
     c := cast(&_context) self
     response_flush_body(c.res, c.stream)
@@ -347,12 +390,14 @@ Context.flush :: (self: Context) {
 
 
 
+/// Retrieves a previously stored value of a certain type.
 Context.get :: (self: Context, key: str, $T: type_expr) -> ? T {
     c := cast(&_context) self
     value := c.variables->get(key)?
     return misc.any_as(value, T) |> Optional.from_ptr()
 }
 
+/// Stores a value in the `Context` for later.
 Context.set :: (self: Context, key: str, v: any) {
     c := cast(&_context) self
 
@@ -363,6 +408,7 @@ Context.set :: (self: Context, key: str, v: any) {
 }
 
 
+/// Helper macro to unwrap an Optional and return a status when it is None.
 Context.unwrap :: macro (self: Context, value: ? $T, status: u32) -> T {
     switch value {
         case .Some as v do return v
@@ -374,6 +420,7 @@ Context.unwrap :: macro (self: Context, value: ? $T, status: u32) -> T {
 }
 
 
+/// Executes the next step in the pipeline.
 Context.next :: (self: Context) {
     c := cast(&_context) self
 
