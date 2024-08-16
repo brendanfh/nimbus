@@ -3,6 +3,7 @@ package nimbus
 use core.encoding.json
 use core.memory
 use core.misc
+use core {Result}
 
 
 Context :: #distinct &_context
@@ -409,6 +410,20 @@ Context.set :: (self: Context, key: str, v: any) {
 
 
 /// Helper macro to unwrap an Optional and return a status when it is None.
+Context.unwrap :: #match #local {}
+
+#overload
+Context.unwrap :: macro (self: Context, value: Result($T, $R), status: u32) -> T {
+    switch value {
+        case .Ok as v do return v
+        case .Err as e {
+            self->blob(status, "text/plain", tprintf("Unwrapped Result with error: {}", e))
+            return #from_proc
+        }
+    }
+}
+
+#overload
 Context.unwrap :: macro (self: Context, value: ? $T, status: u32) -> T {
     switch value {
         case .Some as v do return v

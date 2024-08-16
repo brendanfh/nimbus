@@ -75,6 +75,16 @@ api_data :: (c: Context) {
     c->blob(200, "text/plain", tprintf("Hello {}!\n", vars.name))
 }
 
+@route.{.get, "/unwrap_result"}
+(c: Context) {
+    use core {Result}
+    r: Result(i32, ? str)
+    r = .{ Err = "something went terribly wrong..." }
+
+    v := c->unwrap(r, 400)
+    c->blob(200, "text/plain", tprintf("Value: {}", v))
+}
+
 
 main :: () {
     n := Nimbus.new()
