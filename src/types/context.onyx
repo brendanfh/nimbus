@@ -23,6 +23,8 @@ _context :: struct {
 
     variables: Map(str, any)
 
+    scoped_service_instances: Map(type_expr, rawptr)
+
     steps: [..] struct {
         steps: &[..] Step
         idx: i32
@@ -49,6 +51,12 @@ make_context :: (nimbus: &Nimbus, stream: &io.Stream, allocator: Allocator) -> (
 #package
 destroy_context :: (c: &_context) {
     Context.flush(~~ c)
+
+    for &ent in c.scoped_service_instances.entries {
+        context.allocator->free(ent.value)
+    }
+    delete(&c.scoped_service_instances)
+
     delete(&c.variables)
     delete(&c.steps)
 
@@ -115,9 +123,9 @@ Context.query :: (self: Context, param: str, $Query_Type: type_expr) -> ? Query_
 /// Returns the names of all query parameters.
 Context.query_names :: (self: Context) -> [] str {
     c := cast(&_context) self
-    return iter.as_iter(&c.req.params)
-        |> iter.map(x => x.key)
-        |> iter.collect(c.allocator)
+    return Iterator.from(&c.req.params)
+        |> Iterator.map(x => x.key)
+        |> Iterator.collect(c.allocator)
 }
 
 /// Returns the value of a cookie, if present.
@@ -152,9 +160,9 @@ Context.param :: (self: Context, param: str) -> ? str {
 /// Returns the names of all URL parameters.
 Context.param_names :: (self: Context) -> [] str {
     c := cast(&_context) self
-    return iter.as_iter(&c.req.params)
-        |> iter.map(x => x.key)
-        |> iter.collect(c.allocator)
+    return Iterator.from(&c.req.params)
+        |> Iterator.map(x => x.key)
+        |> Iterator.collect(c.allocator)
 }
 
 
@@ -191,6 +199,37 @@ Context.json_raw :: (self: Context) -> ? json.Value {
 Context.json_as :: (self: Context, $T: type_expr) -> ? T {
     val := self->json_raw()?
     return json.as_any(val, T)
+}
+
+
+/// Returns an instance of the desired service, if the service is recognized to Nimbus.
+Context.service :: (self: Context, $T: type_expr) -> ? &T {
+    return get_service_raw(self, T)
+        |> Optional.transform(x => cast(&T) x)
+}
+
+#local
+get_service_raw :: (self: Context, T: type_expr) -> ? rawptr {
+    c := cast(&_context) self
+    def := c.nimbus._services[T]?
+    switch def {
+        case .Singleton as singleton {
+            return singleton
+        }
+
+        case .Scoped as provider {
+            existing := c.scoped_service_instances[T]
+            if existing do return existing
+
+            new_value := provider()
+            c.scoped_service_instances[T] = new_value
+            return new_value
+        }
+
+        case _ ---
+    }
+
+    return .None
 }
 
 
@@ -266,6 +305,16 @@ Context.bind :: (self: Context, out: any) {
             case "param" {
                 value := self->param(identifier) ?? [] { continue }
                 extract_var(memory.ptr_add(dest, member.offset), member.type, value)
+            }
+
+            case "service" {
+                tinfo := member.type->info()
+                if tinfo.kind != .Pointer do continue
+
+                service_type := tinfo->as_pointer().to
+                get_service_raw(self, service_type)->with([service_ptr] {
+                    *cast(&rawptr) memory.ptr_add(dest, member.offset) = service_ptr
+                })
             }
         }
     }

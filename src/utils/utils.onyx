@@ -70,19 +70,19 @@ urlencode :: (s: str, allocator := context.allocator) -> str {
 }
 
 urldecode :: (s: str, allocator := context.allocator) -> str {
-    out := make([..] u8, s.count, allocator=allocator)
+    out := make(dyn_str, s.count, allocator=allocator)
 
-    i := iter.as_iter(s)
-    defer iter.close(i)
+    i := Iterator.from(s)
+    defer Iterator.close(i)
 
     for #no_close ch in i {
         if ch == '%' {
-            a := iter.next(i) ?? 0
-            b := iter.next(i) ?? 0
+            a := Iterator.next(i) ?? 0
+            b := Iterator.next(i) ?? 0
 
             n := u8.[a, b]
 
-            v := conv.str_to_i64(n, base=16)
+            v := conv.parse_int(n, base=16)
             switch v {
                 match(0x3A, ':')
                 match(0x2F, '/')

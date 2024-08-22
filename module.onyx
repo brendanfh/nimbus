@@ -8,7 +8,6 @@ package nimbus
     io     :: core.io
     os     :: core.os
     arena  :: core.alloc.arena
-    iter   :: core.iter
     conv   :: core.conv
     time   :: core.time
     sync   :: core.sync

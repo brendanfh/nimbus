@@ -85,9 +85,31 @@ api_data :: (c: Context) {
     c->blob(200, "text/plain", tprintf("Value: {}", v))
 }
 
+@route.{.get, "/service_test"}
+(c: Context) {
+    // user := c->service(UserService) |> c->unwrap(500)
+
+    vars := c->bind(struct {
+        @"service" user: &UserService
+    })
+
+    c->blob(200, "text/plain", tprintf("The user's name is {}\n", vars.user.name))
+}
+
+
+UserService :: struct {
+    name: str
+}
 
 main :: () {
     n := Nimbus.new()
+
+    // n->service_singleton(UserService.{ "Joe" })
+    n->service_scoped(() => {
+        use core.random
+        name := random.string(8, alpha_numeric=true)
+        return UserService.{ name }
+    })
 
     n->add(logger(style=.V2))
     n->add(static("/static", "./static"))

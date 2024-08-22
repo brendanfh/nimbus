@@ -62,21 +62,21 @@ TCP_Server.serve :: (tcp: &TCP_Server, port: u32) -> Serve_Status {
     }
 
     logf(.Info, "Serving on port {}", port)
-    tcp.server->handle_events() {
-        case .Ready {
-            ready_client := cast(&core.net.TCP_Event.Ready, it.data).client
-            if ready_client.socket.vtable == null || ready_client.state != .Alive {
-                log(.Warning, "Nimbus", "Discarding dead client")
-                ready_client->read_complete()
-                continue
-            }
+    for ev in tcp.server->event_iter() {
+        if ev.kind != .Ready do continue
 
-            if !tcp.thread_pool {
-                handle_request(tcp, ready_client)
+        ready_client := cast(&core.net.TCP_Event.Ready, ev.data).client
+        if ready_client.socket.vtable == null || ready_client.state != .Alive {
+            log(.Warning, "Nimbus", "Discarding dead client")
+            ready_client->read_complete()
+            continue
+        }
 
-            } else {
-                tcp.ready_clients->send(ready_client)
-            }
+        if !tcp.thread_pool {
+            handle_request(tcp, ready_client)
+
+        } else {
+            tcp.ready_clients->send(ready_client)
         }
     }
 

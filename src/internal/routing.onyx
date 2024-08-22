@@ -74,9 +74,9 @@ PatternMatchResult :: union {
 #local
 pattern_match_routes :: (expected: [] Route.Elem, actual: [] Route.Elem, variables: &$T) -> PatternMatchResult {
     matched_count := 0
-    for iter.zip(
-        iter.as_iter(expected),
-        iter.as_iter(actual))
+    for Iterator.zip(
+        Iterator.from(expected),
+        Iterator.from(actual))
     {
         if it.second.tag == .Variable {
             // Variables are illegal in provided `actual`

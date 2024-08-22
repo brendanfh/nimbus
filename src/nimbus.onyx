@@ -21,9 +21,10 @@ Nimbus :: struct {
     steps:  [..] Step
     routes: [..] Route
 
+    _services: Map(type_expr, ServiceDefinition)
+
     _router_is_in_steps: bool
 }
-
 
 /// Creates and initializes a new instance of `Nimbus`.
 Nimbus.new :: (allocator := context.allocator) -> #Self {
@@ -31,6 +32,7 @@ Nimbus.new :: (allocator := context.allocator) -> #Self {
         allocator = allocator
         routes    = make([..] Route, allocator)
         steps     = make([..] Step,  allocator)
+        _services = make(Map(type_expr, ServiceDefinition), allocator)
     }
 }
 
@@ -135,6 +137,29 @@ Nimbus.group :: (self: &Nimbus, prefix: str) -> &Nimbus {
 }
 
 
+/// Registers a singleton service.
+///
+/// `value` must stay valid for the entire duration of the program.
+Nimbus.service_singleton :: (self: &Nimbus, value: $T) {
+    self._services->put(T, .{ Singleton = new(value, self.allocator) })
+}
+
+/// Registers a scoped service.
+///
+/// `value` must stay valid for the entire duration of the program.
+Nimbus.service_scoped :: (self: &Nimbus, creator: () -> $T) {
+    provider := ([creator]) => {
+        // This `new` is allocating on the `context.allocator`, which is
+        // assumed to be the GC allocator setup by the TCP server.
+        return new(creator())
+    }
+
+    self._services->put(T, .{
+        Scoped = alloc.copy_closure(provider, self.allocator)
+    })
+}
+
+
 //
 // Request serving methods
 //
@@ -169,8 +194,13 @@ ToMiddleware :: interface (T: type_expr) {
     convert :: #match {}
 }
 
-
 #package {
+    ServiceDefinition :: union {
+        Singleton: rawptr
+        Scoped: () -> rawptr
+        Transient: () -> rawptr
+    }
+
     Step :: union {
         WithData: Middleware
         NoData:   Handler

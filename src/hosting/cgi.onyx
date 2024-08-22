@@ -27,7 +27,7 @@ make_request_from_env :: (stream: &io.Stream) -> Request {
 
     req.address.ip = env["REMOTE_ADDR"] ?? ""
 
-    for iter.as_iter(env) {
+    for Iterator.from(env) {
         if str.starts_with(it.key, "HTTP_") {
             req.headers->put(str.advance(it.key, "HTTP_".count), it.value)
         }
