@@ -53,6 +53,12 @@ destroy_context :: (c: &_context) {
     Context.flush(~~ c)
 
     for &ent in c.scoped_service_instances.entries {
+        def := c.nimbus._services[ent.key] ?? [] { continue }
+        scoped := def.Scoped ?? [] { continue }
+        if scoped.destroy != null_proc {
+            scoped.destroy(ent.value)
+        }
+
         context.allocator->free(ent.value)
     }
     delete(&c.scoped_service_instances)
@@ -209,6 +215,9 @@ Context.service :: (self: Context, $T: type_expr) -> ? &T {
 }
 
 #local
+#thread_local threaded_services: Map(type_expr, rawptr)
+
+#local
 get_service_raw :: (self: Context, T: type_expr) -> ? rawptr {
     c := cast(&_context) self
     def := c.nimbus._services[T]?
@@ -217,16 +226,28 @@ get_service_raw :: (self: Context, T: type_expr) -> ? rawptr {
             return singleton
         }
 
-        case .Scoped as provider {
+        case .Scoped as service {
             existing := c.scoped_service_instances[T]
             if existing do return existing
 
-            new_value := provider()
+            new_value := service.create()
             c.scoped_service_instances[T] = new_value
             return new_value
         }
+        
+        case .Threaded as creator {
+            #context_scope {
+                context.allocator = alloc.heap_allocator
 
-        case _ ---
+                existing := threaded_services[T]
+                if existing do return existing
+
+                new_value := creator()
+
+                threaded_services[T] = new_value
+                return new_value
+            }
+        }
     }
 
     return .None

@@ -145,17 +145,33 @@ Nimbus.service_singleton :: (self: &Nimbus, value: $T) {
 }
 
 /// Registers a scoped service.
-///
-/// `value` must stay valid for the entire duration of the program.
-Nimbus.service_scoped :: (self: &Nimbus, creator: () -> $T) {
-    provider := ([creator]) => {
+Nimbus.service_scoped :: (self: &Nimbus, creator: () -> $T, destructor: (&T) -> void = null_proc) {
+    moved_creator := alloc.copy_closure(creator, self.allocator)
+
+    provider := ([moved_creator]) => {
         // This `new` is allocating on the `context.allocator`, which is
         // assumed to be the GC allocator setup by the TCP server.
-        return new(creator())
+        return new(moved_creator())
     }
 
     self._services->put(T, .{
-        Scoped = alloc.copy_closure(provider, self.allocator)
+        Scoped = .{
+            alloc.copy_closure(provider, self.allocator)
+            alloc.copy_closure(destructor, self.allocator)
+        }
+    })
+}
+
+/// Registers a service that is unique per thread.
+Nimbus.service_threaded :: (self: &Nimbus, creator: () -> $T) {
+    moved_creator := alloc.copy_closure(creator, self.allocator)
+
+    provider := ([moved_creator]) => {
+        return new(moved_creator())
+    }
+
+    self._services->put(T, .{
+        Threaded = alloc.copy_closure(provider, self.allocator)
     })
 }
 
@@ -197,8 +213,11 @@ ToMiddleware :: interface (T: type_expr) {
 #package {
     ServiceDefinition :: union {
         Singleton: rawptr
-        Scoped: () -> rawptr
-        Transient: () -> rawptr
+        Scoped: struct {
+            create: () -> rawptr
+            destroy: (rawptr) -> void
+        }
+        Threaded: () -> rawptr
     }
 
     Step :: union {

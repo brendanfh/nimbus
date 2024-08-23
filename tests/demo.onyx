@@ -105,7 +105,7 @@ main :: () {
     n := Nimbus.new()
 
     // n->service_singleton(UserService.{ "Joe" })
-    n->service_scoped(() => {
+    n->service_threaded(() => {
         use core.random
         name := random.string(8, alpha_numeric=true)
         return UserService.{ name }
