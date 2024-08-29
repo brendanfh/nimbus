@@ -484,6 +484,8 @@ Context.unwrap :: #match #local {}
 
 #overload
 Context.unwrap :: macro (self: Context, value: Result($T, $R), status: u32) -> T {
+    use core {tprintf}
+
     switch value {
         case .Ok as v do return v
         case .Err as e {
