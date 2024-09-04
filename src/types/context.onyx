@@ -3,6 +3,7 @@ package nimbus
 use core.encoding.json
 use core.memory
 use core.misc
+use core.intrinsics
 use core {Result}
 
 
@@ -210,6 +211,15 @@ Context.json_as :: (self: Context, $T: type_expr) -> ? T {
 
 
 /// Returns an instance of the desired service, if the service is recognized to Nimbus.
+Context.service :: #match #local {}
+
+#overload
+Context.service :: (self: Context, $T: type_expr) -> ? T where intrinsics.types.type_is_pointer(T) {
+    return get_service_raw(self, T)
+        |> Optional.transform(x => *cast(&T) x)
+}
+
+#overload
 Context.service :: (self: Context, $T: type_expr) -> ? &T {
     return get_service_raw(self, T)
         |> Optional.transform(x => cast(&T) x)
@@ -333,6 +343,13 @@ Context.bind :: (self: Context, out: any) {
                 tinfo := member.type->info()
                 if tinfo.kind != .Pointer do continue
 
+                // First type `&T`
+                get_service_raw(self, member.type)->with([service_ptr] {
+                    *cast(&rawptr) memory.ptr_add(dest, member.offset) = service_ptr
+                    continue
+                })
+
+                // Then try `T`
                 service_type := tinfo->as_pointer().to
                 get_service_raw(self, service_type)->with([service_ptr] {
                     *cast(&rawptr) memory.ptr_add(dest, member.offset) = service_ptr
