@@ -109,12 +109,6 @@ Context.header :: (self: Context, header: str) -> ? str {
 Context.query :: #match #local {}
 
 #overload
-Context.query :: (self: Context, query: str) -> ? str {
-    c := cast(&_context) self
-    return c.req.query[query]
-}
-
-#overload
 Context.query :: (self: Context, param: str, $Query_Type: type_expr) -> ? Query_Type {
     c := cast(&_context) self
 
@@ -124,6 +118,13 @@ Context.query :: (self: Context, param: str, $Query_Type: type_expr) -> ? Query_
     })
     return .None
 }
+
+#overload
+Context.query :: (self: Context, query: str) -> ? str {
+    c := cast(&_context) self
+    return c.req.query[query]
+}
+
 
 
 /// Returns the names of all query parameters.
