@@ -195,6 +195,17 @@ Context.form_value :: (self: Context, key: str) -> ? str {
     return form[key]?[0]
 }
 
+/// Returns all values given for a form parameter.
+Context.form_values :: (self: Context, key: str) -> [] str {
+    c := cast(&_context) self
+    body := request_get_body(c.req)
+
+    body.Form->with([form] {
+        return form[key]?
+    })
+
+    return .[]
+}
 
 /// Returns a `json.Value` of the body of the request, if the body is present and is JSON.
 Context.json_raw :: (self: Context) -> ? json.Value {
