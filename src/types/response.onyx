@@ -82,7 +82,7 @@ Response :: struct {
         }
 
         for& res.cookies.entries {
-            io.write_format(&w, "Set-Cookie: {}={} Path=/\r\n", it.key, it.value)
+            io.write_format(&w, "Set-Cookie: {}={}; Path=/\r\n", it.key, it.value)
         }
 
         io.write(&w, "\r\n")
