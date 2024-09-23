@@ -96,6 +96,14 @@ api_data :: (c: Context) {
     c->blob(200, "text/plain", tprintf("The user's name is {}\n", vars.user.name))
 }
 
+@route.{.get, "/cookie_test"}
+(c: Context) {
+    use core.time
+
+    c->set_cookie("testCookie", "some value", time.gmtime(time.now()->to_epoch() + 7 * 60))
+    c->html(200, "<h1>Cookie set.</h1>")
+}
+
 
 UserService :: struct {
     name: str
@@ -113,13 +121,7 @@ main :: () {
 
     n->add(logger(style=.V2))
     n->add(static("/static", "./static"))
-    n->add(c => {
-        c->next()
-
-        if !c->_response().commited {
-            c->blob(404, "text/plain", "Not found.")
-        }
-    })
+    n->add(not_found("text/plain", "Not found."))
 
     n->add_tagged_routes()
     n->get("/", index)

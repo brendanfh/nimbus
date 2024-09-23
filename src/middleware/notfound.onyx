@@ -1,0 +1,27 @@
+package nimbus
+
+use core {tprintf}
+
+NotFound :: struct {
+	mimetype: str
+	msg: str
+}
+
+not_found :: (mimetype: str, msg: str) -> (nf: NotFound) {
+	nf.mimetype = mimetype
+	nf.msg = msg
+    return
+}
+
+#local
+not_found_handler :: (nf: &NotFound, ctx: Context) {
+	ctx->next()
+
+	if !ctx->_response().commited {
+		ctx->blob(404, nf.mimetype, nf.msg)
+	}
+}
+
+#overload
+ToMiddleware.convert :: macro (nf: &NotFound) => Middleware.{ not_found_handler, nf }
+

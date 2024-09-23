@@ -368,9 +368,20 @@ Context.set_header :: (self: Context, header: str, value: str) {
 }
 
 /// Sets the value of a cookie for the response.
-Context.set_cookie :: (self: Context, name: str, value: str) {
+Context.set_cookie :: (
+    self: Context,
+    name: str,
+    value: str,
+    expires: ? time.Timestamp = .None,
+    path: str = "/"
+) {
     c := cast(&_context) self
-    c.res.cookies->put(name, value)
+
+    c.res.cookies->put(name, Cookie.{
+        value = value,
+        expires = expires,
+        path = path
+    })
 }
 
 /// Writes just the headers of the response.

@@ -1,6 +1,6 @@
 package nimbus
 
-use core {io}
+use core {io, time}
 
 Response :: struct {
     output: &io.BufferStream
@@ -17,7 +17,7 @@ Response :: struct {
     // about this exact issue and it still in 2022 has not
     // been fully resolved.
     headers: Map(str, str)
-    cookies: Map(str, str)
+    cookies: Map(str, Cookie)
     status: u32
 
     chunked  := false
@@ -25,6 +25,12 @@ Response :: struct {
 }
 
 #package {
+    Cookie :: struct {
+        value: str
+        expires: ? time.Timestamp 
+        path: str
+    }
+
     response_init :: (res: &Response) {
         res.writer, res.output = io.string_builder()
     }
@@ -82,7 +88,16 @@ Response :: struct {
         }
 
         for& res.cookies.entries {
-            io.write_format(&w, "Set-Cookie: {}={} Path=/\r\n", it.key, it.value)
+            switch it.value.expires {
+                case .Some as expires {
+                    io.write_format(&w, "Set-Cookie: {}={}; Path={}; Expires={}\r\n",
+                            it.key, it.value.value, it.value.path, expires->format("%a, %d %b %Y %H:%M:%S GMT"))
+                }
+
+                case .None {
+                    io.write_format(&w, "Set-Cookie: {}={}; Path={}\r\n", it.key, it.value.value, it.value.path)
+                }
+            }
         }
 
         io.write(&w, "\r\n")
