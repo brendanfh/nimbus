@@ -91,7 +91,7 @@ Response :: struct {
             switch it.value.expires {
                 case .Some as expires {
                     io.write_format(&w, "Set-Cookie: {}={}; Path={}; Expires={}\r\n",
-                            it.key, it.value.value, it.value.path, expires->format("%a, %d %b %Y %H:%M:%S GMT"))
+                            it.key, it.value.value, it.value.path, expires->format("%a, %d %b %Y %H:%M:%S +0000"))
                 }
 
                 case .None {
