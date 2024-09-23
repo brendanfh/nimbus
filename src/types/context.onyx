@@ -3,6 +3,7 @@ package nimbus
 use core.encoding.json
 use core.memory
 use core.misc
+use core.intrinsics
 use core {Result}
 
 
@@ -109,12 +110,6 @@ Context.header :: (self: Context, header: str) -> ? str {
 Context.query :: #match #local {}
 
 #overload
-Context.query :: (self: Context, query: str) -> ? str {
-    c := cast(&_context) self
-    return c.req.query[query]
-}
-
-#overload
 Context.query :: (self: Context, param: str, $Query_Type: type_expr) -> ? Query_Type {
     c := cast(&_context) self
 
@@ -124,6 +119,13 @@ Context.query :: (self: Context, param: str, $Query_Type: type_expr) -> ? Query_
     })
     return .None
 }
+
+#overload
+Context.query :: (self: Context, query: str) -> ? str {
+    c := cast(&_context) self
+    return c.req.query[query]
+}
+
 
 
 /// Returns the names of all query parameters.
@@ -193,6 +195,17 @@ Context.form_value :: (self: Context, key: str) -> ? str {
     return form[key]?[0]
 }
 
+/// Returns all values given for a form parameter.
+Context.form_values :: (self: Context, key: str) -> [] str {
+    c := cast(&_context) self
+    body := request_get_body(c.req)
+
+    body.Form->with([form] {
+        return form[key]?
+    })
+
+    return .[]
+}
 
 /// Returns a `json.Value` of the body of the request, if the body is present and is JSON.
 Context.json_raw :: (self: Context) -> ? json.Value {
@@ -209,6 +222,15 @@ Context.json_as :: (self: Context, $T: type_expr) -> ? T {
 
 
 /// Returns an instance of the desired service, if the service is recognized to Nimbus.
+Context.service :: #match #local {}
+
+#overload
+Context.service :: (self: Context, $T: type_expr) -> ? T where intrinsics.types.type_is_pointer(T) {
+    return get_service_raw(self, T)
+        |> Optional.transform(x => *cast(&T) x)
+}
+
+#overload
 Context.service :: (self: Context, $T: type_expr) -> ? &T {
     return get_service_raw(self, T)
         |> Optional.transform(x => cast(&T) x)
@@ -230,7 +252,7 @@ get_service_raw :: (self: Context, T: type_expr) -> ? rawptr {
             existing := c.scoped_service_instances[T]
             if existing do return existing
 
-            new_value := service.create()
+            new_value := service.create(context.allocator)
             c.scoped_service_instances[T] = new_value
             return new_value
         }
@@ -242,7 +264,7 @@ get_service_raw :: (self: Context, T: type_expr) -> ? rawptr {
                 existing := threaded_services[T]
                 if existing do return existing
 
-                new_value := creator()
+                new_value := creator(context.allocator)
 
                 threaded_services[T] = new_value
                 return new_value
@@ -332,6 +354,13 @@ Context.bind :: (self: Context, out: any) {
                 tinfo := member.type->info()
                 if tinfo.kind != .Pointer do continue
 
+                // First type `&T`
+                get_service_raw(self, member.type)->with([service_ptr] {
+                    *cast(&rawptr) memory.ptr_add(dest, member.offset) = service_ptr
+                    continue
+                })
+
+                // Then try `T`
                 service_type := tinfo->as_pointer().to
                 get_service_raw(self, service_type)->with([service_ptr] {
                     *cast(&rawptr) memory.ptr_add(dest, member.offset) = service_ptr
@@ -495,6 +524,8 @@ Context.unwrap :: #match #local {}
 
 #overload
 Context.unwrap :: macro (self: Context, value: Result($T, $R), status: u32) -> T {
+    use core {tprintf}
+
     switch value {
         case .Ok as v do return v
         case .Err as e {
