@@ -4,12 +4,12 @@ package nimbus
 parse_url_encoded_key_value :: (dest: &Map(str, str), input: &str) {
     // @ErrorHandling
     while !str.empty(*input) {
-        key   := str.read_until(input, '=') |> urldecode();
-        str.advance(input);
-        value := str.read_until(input, '&') |> urldecode();
-        str.advance(input);
+        key   := str.read_until(input, '=') |> urldecode()
+        str.advance(input)
+        value := str.read_until(input, '&') |> urldecode()
+        str.advance(input)
 
-        dest->put(key, value);
+        dest->put(key, value)
     }
 }
 
@@ -17,13 +17,13 @@ parse_url_encoded_key_value :: (dest: &Map(str, str), input: &str) {
 parse_url_encoded_key_value_multi :: (dest: &Map(str, [..] str), input: &str) {
     // @ErrorHandling
     while !str.empty(*input) {
-        key   := str.read_until(input, '=') |> urldecode();
-        str.advance(input);
-        value := str.read_until(input, '&') |> urldecode();
-        str.advance(input);
+        key   := str.read_until(input, '=') |> urldecode()
+        str.advance(input)
+        value := str.read_until(input, '&') |> urldecode()
+        str.advance(input)
 
-        values := dest->get_ptr_or_create(key);
-        Array.push(values, value);
+        values := dest->get_ptr_or_create(key)
+        Array.push(values, value)
     }
 }
 
@@ -32,27 +32,27 @@ parse_header :: #match #local {}
 
 #overload
 parse_header :: (r: &io.Reader) -> (str, str) {
-    line := r->read_line();
-    if line == "\r\n" do return "", "";
+    line := r->read_line()
+    if line == "\r\n" do return "", ""
 
-    return parse_header(&line);
+    return parse_header(&line)
 }
 
 #overload
 parse_header :: (line: &str) -> (str, str) {
-    l := str.read_until(line, '\n');
-    str.advance_line(line);
+    l := str.read_until(line, '\n')
+    str.advance_line(line)
 
-    header := str.read_until(&l, ':');
-    str.advance(&l, 2);
+    header := str.read_until(&l, ':')
+    str.advance(&l, 2)
 
     // Remove the \r\n that occurs at the end of the value.
-    value := l;
-    str.strip_trailing_whitespace(&value);
+    value := l
+    str.strip_trailing_whitespace(&value)
 
-    header = str.to_lowercase(header);
+    header = str.to_lowercase(header)
 
-    return header, value;
+    return header, value
 }
 
 #package
@@ -60,15 +60,15 @@ parse_cookies :: #match #local {}
 
 #overload
 parse_cookies :: (line: str, m: &Map(str, str)) {
-    value := line;
+    value := line
     while true {
-        pair := str.read_until(&value, "; ");
-        if pair.count == 0 do break;
+        pair := str.read_until(&value, " ")
+        if pair.count == 0 do break
 
-        k, v := str.bisect(pair, '=');
-        m->put(k, v);
+        k, v := str.bisect(pair, '=')
+        m->put(k, v)
 
-        str.advance(&value, 2);
+        str.advance(&value, 2)
     }
 }
 

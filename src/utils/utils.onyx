@@ -29,40 +29,17 @@ HTTP_Method :: enum {
 urlencode :: (s: str, allocator := context.allocator) -> str {
     out := make([..] u8, s.count, allocator=allocator)
 
-    for ch in s do switch ch {
+    for ch in s {
         //
         // This list was taken from:
         // https://developer.mozilla.org/en-US/docs/Glossary/percent-encoding
-        match(':', "%3A")
-        match('/', "%2F")
-        match('?', "%3F")
-        match('#', "%23")
-        match('[', "%5B")
-        match(']', "%5D")
-        match('@', "%40")
-        match('!', "%21")
-        match('$', "%24")
-        match('&', "%26")
-        match('\'', "%27")
-        match('(', "%28")
-        match(')', "%29")
-        match('*', "%2A")
-        match('+', "%2B")
-        match(',', "%2C")
-        match('\\', "%3B")
-        match('<', "%3C")
-        match('=', "%3D")
-        match('>', "%3E")
-        match('%', "%25")
-        match(' ', "%20")
-        match('"', "%22")
+        if ":/?#[]@!$&'()*+,\\<=>% \""->contains(ch) {
+            formatted: [3] u8
 
-        case _ do out << ch
-
-        match :: macro (from: u8, to: str) {
-            //
-            // How's this for a one-liner
-            case from do for to do out << it
+            conv.format(formatted, "%{w2x16}", cast(u32) ch)
+                |> out->append()
+        } else {
+            out->append(ch)
         }
     }
 
@@ -73,9 +50,8 @@ urldecode :: (s: str, allocator := context.allocator) -> str {
     out := make(dyn_str, s.count, allocator=allocator)
 
     i := Iterator.from(s)
-    defer Iterator.close(i)
 
-    for #no_close ch in i {
+    for ch in i {
         if ch == '%' {
             a := Iterator.next(i) ?? 0
             b := Iterator.next(i) ?? 0
@@ -83,35 +59,7 @@ urldecode :: (s: str, allocator := context.allocator) -> str {
             n := u8.[a, b]
 
             v := conv.parse_int(n, base=16)
-            switch v {
-                match(0x3A, ':')
-                match(0x2F, '/')
-                match(0x3F, '?')
-                match(0x23, '#')
-                match(0x5B, '[')
-                match(0x5D, ']')
-                match(0x40, '@')
-                match(0x21, '!')
-                match(0x24, '$')
-                match(0x26, '&')
-                match(0x27, '\'')
-                match(0x28, '(')
-                match(0x29, ')')
-                match(0x2A, '*')
-                match(0x2B, '+')
-                match(0x2C, ',')
-                match(0x3B, '')
-                match(0x3C, '<')
-                match(0x3D, '=')
-                match(0x3E, '>')
-                match(0x25, '%')
-                match(0x20, ' ')
-                match(0x22, '"')
-
-                match :: macro (from: i64, to: u8) {
-                    case from do out << to
-                }
-            }
+            out << ~~v
 
         } elseif ch == '+' {
             out << ' '

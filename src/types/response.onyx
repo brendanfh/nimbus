@@ -71,7 +71,7 @@ Response :: struct {
 
     response_write_headers :: (res: &Response, s: &io.Stream) {
         if res.commited {
-            logf(.Warning, "attempting to re-write headers of commited response")
+            logf(.Warning, "attempting to re-write headers of committed response")
             return
         }
 

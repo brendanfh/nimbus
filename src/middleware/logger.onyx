@@ -1,16 +1,18 @@
 package nimbus
 
+use core.encoding.json
+use core {tprintf}
+
 Logger :: struct {
-    writer: io.Writer;
+    writer: io.Writer
 
-    style := LoggerStyle.V1;
-
-    log :: logger_log_request
+    style := LoggerStyle.V1
 }
 
 LoggerStyle :: enum {
-    V1;
-    V2;
+    V1
+    V2
+    JSON
 }
 
 
@@ -18,7 +20,7 @@ logger :: (s: &io.Stream = &core.stdio.stream, style := LoggerStyle.V1) -> Logge
     return .{
         io.writer_make(s),
         style
-    };
+    }
 }
 
 #local
@@ -37,15 +39,15 @@ logger_log_request :: (l: &Logger, c: Context) {
                 req.address.ip,
                 req.method,
                 req.headers["host"] ?? "", req.endpoint,
-                res.status);
+                res.status)
 
         case .V2 {
-            status_color := "92";
+            status_color := "92"
             if res.status / 100 != 2 {
-                status_color = "93";
+                status_color = "93"
             }
             if res.status >= 400 {
-                status_color = "91";
+                status_color = "91"
             }
 
             io.write_format(
@@ -58,12 +60,24 @@ logger_log_request :: (l: &Logger, c: Context) {
                 req.endpoint,
                 req.headers["host"] ?? "",
                 req.address.ip
-            );
+            )
+        }
+
+        case .JSON {
+            data := .{
+                status = res.status
+                method = tprintf("{}", req.method)
+                endpoint = req.endpoint
+                client = req.address.ip
+            }
+
+            json.encode(&l.writer, data)
+            l.writer->write("\n")
         }
     }
 
-    io.writer_flush(&l.writer);
-    io.stream_flush(l.writer.stream);
+    io.writer_flush(&l.writer)
+    io.stream_flush(l.writer.stream)
 }
 
 #overload

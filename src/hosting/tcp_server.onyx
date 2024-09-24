@@ -63,6 +63,8 @@ TCP_Server.serve :: (tcp: &TCP_Server, port: u32) -> Serve_Status {
 
     logf(.Info, "Serving on port {}", port)
     for ev in tcp.server->event_iter() {
+        make_sure_all_threads_are_alive(tcp)
+
         if ev.kind != .Ready do continue
 
         ready_client := cast(&core.net.TCP_Event.Ready, ev.data).client
@@ -81,6 +83,16 @@ TCP_Server.serve :: (tcp: &TCP_Server, port: u32) -> Serve_Status {
     }
 
     return .Success
+}
+
+#local
+make_sure_all_threads_are_alive :: (tcp: &TCP_Server) {
+    for &t in tcp.thread_pool {
+        if !t.alive {
+            logf(.Info, "Spawning another thread because thread {} died", t.id)
+            thread.spawn(t, tcp, tcp_server_thread)
+        }
+    }
 }
 
 #local
