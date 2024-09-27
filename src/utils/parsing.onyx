@@ -62,7 +62,7 @@ parse_cookies :: #match #local {}
 parse_cookies :: (line: str, m: &Map(str, str)) {
     value := line
     while true {
-        pair := str.read_until(&value, " ")
+        pair := str.read_until(&value, "; ")
         if pair.count == 0 do break
 
         k, v := str.bisect(pair, '=')
