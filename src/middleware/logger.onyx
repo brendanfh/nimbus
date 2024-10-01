@@ -1,6 +1,8 @@
 package nimbus
 
 use core.encoding.json
+use core.os
+use core.time
 use core {tprintf}
 
 Logger :: struct {
@@ -25,7 +27,9 @@ logger :: (s: &io.Stream = &core.stdio.stream, style := LoggerStyle.V1) -> Logge
 
 #local
 logger_log_request :: (l: &Logger, c: Context) {
+    start_time := os.time()
     c->next()
+    duration   := os.time() - start_time
 
     req := c->request()
     res := c->_response()
@@ -52,13 +56,14 @@ logger_log_request :: (l: &Logger, c: Context) {
 
             io.write_format(
                 &l.writer,
-                "\e[37m[thread {}]\e[0m [\e[1;{}m{}\e[0m] \e[1;94m{} {}\e[0m  host: '{}' client: '{}'\n",
-                context.thread_id,
+                "{} \e[1;96m{} \e[1;{}m{}\e[0m \e[1;94m{} {}{} \e[90m{}\e[0m\n",
+                time.gmtime(start_time / 1000)->format()
+                "<1ms" if duration == 0 else tprintf("{}ms", duration)
                 status_color,
                 res.status,
                 req.method,
-                req.endpoint,
                 req.headers["host"] ?? "",
+                req.endpoint,
                 req.address.ip
             )
         }
