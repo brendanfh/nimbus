@@ -3,7 +3,7 @@ package {
     author "Brendan Hansen" 
     url "https://github.com/brendanfh/nimbus" 
     description "A web-framework for Onyx" 
-    version "0.0.19" 
+    version "0.0.20" 
 }
 
 config {
