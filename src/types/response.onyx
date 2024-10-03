@@ -67,6 +67,11 @@ Response :: struct {
             content := str.as_str(res.output)
             res.headers["Content-Length"] = core.tprintf("{}", content.length)
         }
+
+        // HACK: Right now, we close every connection right away.
+        // This is because there are too many issues with trying
+        // to properly poll a socket pool for ready connections.
+        res.headers["Connection"] = "close"
     }
 
     response_write_headers :: (res: &Response, s: &io.Stream) {

@@ -22,6 +22,9 @@ _context :: struct {
     // The stream to write the response to
     stream: &io.Stream
 
+    // The socket of the current request
+    socket: ? net.Socket
+
     variables: Map(str, any)
 
     scoped_service_instances: Map(type_expr, rawptr)
@@ -490,6 +493,13 @@ Context.file :: (self: Context, code: u32, mimetype: str, path: str) {
 Context.writer :: (self: Context) -> &io.Writer {
     c := cast(&_context) self
     return &c.res.writer
+}
+
+/// Returns the raw socket of the connection.
+/// **You likely do not need to use this, unless you are swithing protocols.**
+Context.socket :: (self: Context) -> ? net.Socket {
+    c := cast(&_context) self
+    return c.socket
 }
 
 /// Sends the contents stored in the response writer.

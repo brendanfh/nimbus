@@ -21,9 +21,6 @@ Request :: struct {
     cookies: Map(str, str)
     params:  Map(str, str)
 
-     // This is only set when the TCP host is used.
-    client: &net.TCP_Server.Client
-
     address: Request_Address
 
     body_reader: &io.Reader

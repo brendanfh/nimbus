@@ -7,8 +7,9 @@ use core { stdio }
 #package
 cgi :: (nimbus: &Nimbus, stream: &io.Stream) {
     c := make_context(nimbus, stream, nimbus.allocator)
-
+    
     *c.req = make_request_from_env(stream)
+    c.socket = .None
 
     process_request(nimbus, ~~ &c)
     
