@@ -1,0 +1,314 @@
+package nimbus
+
+use runtime
+use core.encoding.json
+use core.memory
+use core.net
+use core.math
+use core.io
+use core { tprintf, Result }
+
+#package
+/// Internal details about working with the request object.
+/// These details (likely) do not have to be exposed publically,
+/// as the Context object provides a better interface over this.
+RequestInternal :: struct {}
+
+RequestInternal.free :: (req: &Request) {
+    delete(&req.headers)
+    delete(&req.query)
+    delete(&req.cookies)
+    delete(&req.params)
+}
+
+RequestInternal.get_body :: (req: &Request) -> &Request_Body {
+    if req._body_cache {
+        return req._body_cache->unwrap_ptr()
+    }
+
+    body: Request_Body
+
+    content_type := get_header(&req.headers, "content-type") ?? ""
+
+    if content_type == "application/json" ||
+        (str.starts_with(content_type, "application/") && str.ends_with(content_type, "+json"))
+    {
+        switch RequestInternal.parse_json(req) {
+            case .None do logf(.Warning, "Failed to parse JSON body")
+            case .Some as data {
+                body = .{ Json = data }
+            }
+        }
+    }
+
+    elseif str.starts_with(content_type, "application/x-www-form-urlencoded") {
+        body = .{
+            Form = .{
+                values = RequestInternal.parse_form_urlencoded(req)
+                files = .[]
+            }
+        }
+    }
+    
+    elseif str.starts_with(content_type, "multipart/form-data") {
+        switch RequestInternal.parse_multipart_form(req) {
+            case .None do logf(.Warning, "Failed to read multipart/form-data")
+            case .Some as data {
+                body = .{ Form = data }
+            }
+        }
+    }
+
+    else {
+        body = .{ Raw = RequestInternal.parse_raw(req) }
+    }
+    
+    req._body_cache = body
+    return req._body_cache->unwrap_ptr()
+}
+
+RequestInternal.parse_raw :: (req: &Request) -> str {
+    r := io.Reader.make(&req.body_stream)
+    return r->read_all()
+}
+
+RequestInternal.parse_json :: (req: &Request) -> ? json.Json {
+    contents := RequestInternal.parse_raw(req)
+
+    return json.decode_with_result(contents).Ok
+}
+
+RequestInternal.parse_form_urlencoded :: (req: &Request) -> Map(str, [..] str) {
+    out := make(Map(str, [..] str))
+
+    body_reader := io.Reader.make(&req.body_stream)
+    while !body_reader->empty() {
+        kv_pair := body_reader->read_until('&', consume_end=true)
+        if kv_pair == "" do break
+
+        if kv_pair[kv_pair.length - 1] == '&' {
+            kv_pair.length -= 1
+        }
+
+        key, value := kv_pair->bisect('=')
+
+        key = urldecode(key)
+        value = urldecode(value)
+
+        values := out->get_ptr_or_create(key)
+        if values.count == 0 do values->ensure_capacity(1)
+        values->push(value)
+    }
+
+    return out
+}
+
+RequestInternal.parse_multipart_form :: (req: &Request) -> ? FormData {
+    values := make(Map(str, [..] str))
+    files  := make([..] File)
+
+    _, boundary_map := str.bisect(get_header(&req.headers, "content-type") ?? "", "; ")
+    key, value      := str.bisect(boundary_map, '=')
+
+    str.strip_leading_whitespace(&key)
+    str.strip_leading_whitespace(&value)
+
+    if key != "boundary" {
+        return .None
+    }
+
+    boundary := core.tprintf("--{}", value)
+
+    use body_reader := io.Reader.make(&req.body_stream)
+    while true {
+        boundary_line := io.Reader.read_line(&body_reader)
+        if !str.starts_with(boundary_line, boundary) {
+            logf(.Debug, "bad multipart/form; boundary expected but didn't get it.")
+            return .None
+        }
+
+        // Boundary with `--` at the end means the body is done.
+        if str.ends_with(boundary_line, "--\r\n") {
+            break
+        }
+
+        name: str
+        filename: str
+        content_type: str
+
+        for header in Iterator.generator_no_copy(&body_reader, parse_header) {
+            if header.name == ci_str.{ "content-disposition" } {
+                for kv_pair in str.split_iter(header.value, "; ") {
+                    key, value := str.bisect(kv_pair, '=')
+
+                    if key == "form-data" do continue
+
+                    if key == "name" {
+                        // Remove the quotes on the name
+                        name = value[1 .. value.length - 1]
+                    }
+
+                    if key == "filename" {
+                        // Remove the quotes on the file name
+                        filename = value[1 .. value.length - 1]
+                    }
+                }
+            }
+
+            if header.name == ci_str.{ "content-type" } {
+                content_type = header.value
+            }
+        }
+
+        content := make(dyn_str)
+
+        previous_matched := 0
+        while true {
+            if body_reader->ensure_buffered(boundary.length) != .None {
+                logf(.Debug, "encountered poorly formatted multipart/form-data. terminating early")
+                break break
+            }
+
+            start, matched := partial_match(
+                body_reader.buffer[body_reader.start .. body_reader.end]
+                boundary[previous_matched .. boundary.length]
+            )
+
+            if previous_matched + matched == boundary.count {
+                if start > 0 {
+                    content->ensure_capacity(content.length + start)
+                    body_reader->read_bytes(content[content.length .. content.length + start])
+                    content.length += start
+                }
+                break
+            }
+
+            previous_matched = matched
+
+            to_read := body_reader->get_buffered()
+            content->ensure_capacity(content.length + to_read)
+            body_reader->read_bytes(content[content.length .. content.length + to_read])
+            content.length += to_read
+        }
+
+        assert(content[content.length - 2] == '\r', "")
+        assert(content[content.length - 1] == '\n', "")
+        content.length -= 2
+
+        if filename {
+            files->push(.{ filename, name, content_type, content })
+
+        } else {
+            v := values->get_ptr_or_create(name)
+            if v.length == 0 {
+                v->ensure_capacity(1)
+            }
+            v->push(content)
+        }
+    }
+
+    return FormData.{
+        values
+        files
+    }
+
+
+
+    partial_match :: (s: str, needle: str) -> (i32, i32) {
+        start := 0
+        matched := 0
+        for ch, i in s {
+            if ch == needle[matched] {
+                matched += 1
+            } else {
+                start = i + 1
+                matched = 0
+            }
+
+            if matched == needle.count do break
+        }
+
+        return start, matched
+    }
+}
+
+RequestInternal.make_body_stream :: (req: &Request, in_reader: &io.Reader) -> Body_Stream {
+    state := Body_Stream.State.{ Done = .{} }
+
+    if get_header(&req.headers, "transfer-encoding")->value_or("") == "chunked" {
+        state = .{ Chunked = -1 }
+    }
+
+    content_length := get_header(&req.headers, "content-length")
+        ->and_then(x => conv.parse(u32, x))
+        ->value_or(0)
+
+    if content_length > 0 {
+        state = .{ Remaining = content_length }
+    }
+
+    return .{
+        base = .{
+            vtable = &body_stream_vtable
+            flags  = .Block_On_Read
+        }
+        in_reader = in_reader
+        state = state
+    }
+}
+
+#local
+body_stream_vtable := io.Stream_Vtable.{
+    read = (s: &Body_Stream, buffer: [] u8) -> Result(u32, io.Error) {
+        switch s.state {
+            case .Done do return .{ Err = .EOF }
+
+            case .Remaining as remaining {
+                to_read := math.min(remaining, buffer.count)
+                err := io.Reader.read_fill_buffer(s.in_reader, buffer[0 .. to_read])
+                if err != .None do return .{ Err = err }
+
+                remaining_after_read := remaining - to_read
+                if remaining_after_read == 0 {
+                    s.state = .Done
+                } else {
+                    s.state = .{ Remaining = remaining_after_read }
+                }
+
+                return .{ Ok = to_read }
+            }
+
+            case .Chunked as remaining_in_chunk {
+                if remaining_in_chunk <= 0 {
+                    // On the first time entering this function, remaining_in_chunk will be
+                    // -1. Once we have exhausted the remaining bytes in the chunk, this
+                    // condition will trip again, but with remaining_in_chunk set to 0.
+                    // Per the HTTP spec, there is an extra CRLF after the final bytes of
+                    // a chunk, before the next chunk length
+                    if remaining_in_chunk == 0 {
+                        io.Reader.advance_line(s.in_reader)
+                    }
+
+                    remaining_in_chunk = ~~ (
+                        io.Reader.read_line(s.in_reader)
+                        |> conv.parse_int(_, 16)
+                    )
+                }
+
+                if remaining_in_chunk == 0 {
+                    s.state = .Done
+                    return .{ Err = .EOF }
+                }
+
+                to_read := math.min(remaining_in_chunk, buffer.count)
+                err := io.Reader.read_fill_buffer(s.in_reader, buffer[0 .. to_read])
+                if err != .None do return .{ Err = err }
+
+                remaining_after_read := remaining_in_chunk - to_read
+                s.state = .{ Chunked = remaining_after_read }
+
+                return .{ Ok = to_read }
+            }
+        }
+    }
+}

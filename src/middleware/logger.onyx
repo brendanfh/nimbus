@@ -40,9 +40,10 @@ logger_log_request :: (l: &Logger, c: Context) {
                 &l.writer,
                 "[{}] {} {} {}{} - {}\n",
                 context.thread_id,
-                req.address.ip,
+                req.address,
                 req.method,
-                req.headers["host"] ?? "", req.endpoint,
+                get_header(&req.headers, "host") ?? "",
+                req.endpoint,
                 res.status)
 
         case .V2 {
@@ -62,9 +63,9 @@ logger_log_request :: (l: &Logger, c: Context) {
                 status_color,
                 res.status,
                 req.method,
-                req.headers["host"] ?? "",
+                get_header(&req.headers, "host") ?? "",
                 req.endpoint,
-                req.address.ip
+                req.address
             )
         }
 
@@ -73,7 +74,7 @@ logger_log_request :: (l: &Logger, c: Context) {
                 status = res.status
                 method = tprintf("{}", req.method)
                 endpoint = req.endpoint
-                client = req.address.ip
+                client = req.address
             }
 
             json.encode(&l.writer, data)

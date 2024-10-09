@@ -1,0 +1,70 @@
+package nimbus
+
+Headers :: Map(ci_str, [..] str)
+
+Header :: struct {
+    name: ci_str
+    value: str
+}
+
+#package
+free_headers :: (headers: &Headers) {
+    for& headers.entries {
+        delete(&it.value)
+    }
+
+    delete(headers)
+}
+
+#package
+get_header :: (headers: &Headers, h: str) -> ? str {
+    hs := headers->get(ci_str.{h})?
+    return Slice.get_opt(hs, 0)
+}
+
+#package
+add_header :: #match #local {
+    (headers: &Headers, h: str, v: str) {
+        l := headers->get_ptr_or_create(ci_str.{h})
+
+        if l.capacity == 0 {
+            l->ensure_capacity(1)
+        }
+
+        l->push(v)
+    }
+
+    (headers: &Headers, h: Header) {
+        l := headers->get_ptr_or_create(h.name)
+
+        if l.capacity == 0 {
+            l->ensure_capacity(1)
+        }
+
+        l->push(h.value)
+    }
+}
+
+#package
+parse_header :: (r: &io.Reader) -> ? Header {
+    line := r->read_line()
+    if line == "\r\n" do return .None
+
+    name, value := str.bisect(line, ": ")
+
+    assert(str.ends_with(value, "\r\n"), "expected header value to end in \\r\\n")
+    value.length -= 2
+
+    return Header.{
+        ci_str.{name}, value
+    }
+}
+
+#package
+parse_cookies :: (line: str, m: &Map(str, str)) {
+    for cookie in str.split_iter(line, "; ") {
+        k, v := str.bisect(cookie, '=')
+        m->put(k, v)
+    }
+}
+

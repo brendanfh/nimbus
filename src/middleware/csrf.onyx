@@ -1,0 +1,69 @@
+package nimbus
+
+use core.random
+
+CSRF :: struct {
+    token_length     := 32
+    token_lookup     := "form:csrf"
+    context_key      := "csrf"
+    cookie_name      := "csrf"
+    cookie_domain    := ""
+    cookie_path      := ""
+    cookie_max_age   := 86400
+    cookie_secure    := false
+    cookie_http_only := false
+    cookie_same_site := Cookie.SameSite.Default
+}
+
+#overload
+ToMiddleware.convert :: macro (c: &CSRF) => Middleware.{ csrf_handler, c }
+
+#local
+csrf_handler :: (self: &CSRF, c: Context) {
+    token := c->cookie(self.cookie_name) ?? [] {
+        return random.string(self.token_length, alpha_numeric=true)
+    }
+
+    switch c->method() {
+        case .get, .head, .options, .trace do break
+
+        case _ {
+            given_token: str
+            if !extract_value(c, self.token_lookup, &given_token, str) {
+                logf(.Warning, "xsrf token lookup failed. tried looking up '{}'", self.token_lookup)
+                return
+            }
+
+            if token != given_token {
+                logf(.Warning, "xsrf token mismatched")
+                return
+            }
+        }
+    }
+
+    cookie: Cookie
+    cookie.name = self.cookie_name
+    cookie.value = token
+    if self.cookie_path {
+        cookie.path = self.cookie_path
+    }
+
+    if self.cookie_domain {
+        cookie.domain = self.cookie_domain
+    }
+
+    if self.cookie_same_site != .Default {
+        cookie.same_site = self.cookie_same_site
+    }
+
+    cookie.expires = time.gmtime(time.now()->to_epoch() + ~~self.cookie_max_age)
+    cookie.secure = self.cookie_secure
+    cookie.http_only = self.cookie_http_only
+    c->set_cookie(cookie)
+
+    c->set(self.context_key, token)
+    c->set_header("Vary", "Cookie")
+
+    c->next()
+}
+

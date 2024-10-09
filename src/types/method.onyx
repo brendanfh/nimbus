@@ -1,0 +1,28 @@
+package nimbus
+
+HTTP_Method :: enum {
+    UNKNOWN
+    GET
+    HEAD
+    POST
+    PUT
+    DELETE
+    CONNECT
+    OPTIONS
+    TRACE
+    PATCH
+
+    ALL
+
+    unknown :: UNKNOWN
+    get :: GET
+    head :: HEAD
+    post :: POST
+    put :: PUT
+    delete :: DELETE
+    connect :: CONNECT
+    options :: OPTIONS
+    trace :: TRACE
+    patch :: PATCH
+}
+

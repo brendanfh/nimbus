@@ -1,0 +1,24 @@
+package nimbus
+
+use core.hash
+use core.conv
+
+ci_str :: #distinct str
+
+#init #after conv.custom_formatters_initialized () {
+    conv.register_custom_formatter((output: &conv.Format_Output, format: &conv.Format, s: &ci_str) {
+        conv.format(output, "{}", cast(str) *s)
+    })
+}
+
+ci_str.hash :: (s: #Self) => {
+    hash: u32 = 5381
+    for ch in cast(str) s {
+        hash += (hash << 5) + ~~(ch->to_lower())
+    }
+    return hash
+}
+
+#operator== :: (s1, s2: ci_str) -> bool {
+    return str.equal_insensitive(cast(str) s1, cast(str) s2)
+}

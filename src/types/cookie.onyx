@@ -1,0 +1,65 @@
+package nimbus
+
+use core.time
+use core.io
+
+Cookie :: struct {
+    name: str
+    value: str
+    expires: ? time.Timestamp 
+    path: str
+    domain: str
+    max_age: i32
+    secure: bool
+    http_only: bool
+    same_site: SameSite
+
+    SameSite :: enum {
+        Default
+        None
+        Lax
+        Strict
+    }
+}
+
+#package
+cookie_write :: (c: &Cookie, w: &io.Writer) {
+    io.write(w, c.name)
+    io.write(w, "=")
+    io.write(w, c.value)
+
+    if c.path {
+        io.write_format(w, "; Path={}", c.path)
+    }
+
+    if c.domain {
+        // Robustness: check for invalid cookie domain.
+        io.write_format(w, "; Domain={}", c.domain)
+    }
+
+    c.expires->with([e] {
+        io.write_format(w, "; Expires={}", e->format("%a, %d %b %Y %H:%M:%S GMT"))
+    })
+
+    if c.max_age > 0 {
+        io.write_format(w, "; Max-Age={}", c.max_age)
+    } elseif c.max_age < 0 {
+        io.write(w, "; Max-Age=0")
+    }
+    
+    if c.http_only {
+        io.write(w, "; HttpOnly")
+    }
+
+    if c.secure {
+        io.write(w, "; Secure")
+    }
+
+    switch c.same_site {
+        case .Default ---
+        case _ do io.write_format(w, "; SameSite={}", c.same_site)
+    }
+
+    // Note: Not supporting partitioned cookies
+}
+

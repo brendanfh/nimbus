@@ -1,219 +1,57 @@
 package nimbus
 
-use runtime
 use core.encoding.json
-use core.memory
-use core.net
-use core { tprintf }
 
 Request :: struct {
     method: HTTP_Method
 
-    // base_endpoint is what was originally requested.
-    // endpoint is modified through request routing,
-    // and ends up being the final route that was
-    // matched.
     endpoint: str
     _processed_endpoint: [] Route.Elem
 
-    headers: Map(str, str)
+    proto: str
+
+    headers: Headers
     query:   Map(str, str)
     cookies: Map(str, str)
     params:  Map(str, str)
 
-    address: Request_Address
+    address: ? str
 
-    body_reader: &io.Reader
-    _body_was_read := false
+    body_stream: Body_Stream
 
     _body_cache: ? Request_Body
 }
 
-Request_Address :: struct {
-    ip: str
+Body_Stream :: struct {
+    use base: io.Stream
+    in_reader: &io.Reader
+
+    state: State
+
+    State :: union {
+        Done: void
+        Remaining: i32
+        Chunked: i32
+    }
 }
 
 Request_Body :: union {
+    Stream: &io.Stream
     Raw:  str
-    Form: Map(str, [..] str)
+    Form: FormData
     Json: json.Json
 }
 
-#package
-request_free :: (req: &Request) {
-    delete(&req.headers)
-    delete(&req.query)
-    delete(&req.cookies)
-    delete(&req.params)
-
-    // TODO: free the parsed body
+FormData :: struct {
+    values: Map(str, [..] str)
+    files:  [] File
 }
 
-#package
-request_get_body :: (req: &Request) -> &Request_Body {
-    if req._body_cache {
-        return req._body_cache->unwrap_ptr()
-    }
-
-    body: Request_Body
-
-    content_type := req.headers["content-type"] ?? ""
-
-    if content_type == "application/json" ||
-        (str.starts_with(content_type, "application/") && str.ends_with(content_type, "+json"))
-    {
-        switch request_parse_json(req) {
-            case .None do logf(.Warning, "Failed to parse JSON body")
-            case .Some as data {
-                body = .{ Json = data }
-            }
-        }
-    }
-
-    elseif str.starts_with(content_type, "application/x-www-form-urlencoded") {
-        body = .{ Form = request_parse_form_urlencoded(req) }
-    }
-    
-    elseif str.starts_with(content_type, "multipart/form-data") {
-        switch request_parse_multipart_form(req) {
-            case .None do logf(.Warning, "Failed to read multipart/form-data")
-            case .Some as data {
-                body = .{ Form = data }
-            }
-        }
-    }
-
-    else {
-        body = .{ Raw = request_parse_raw(req) }
-    }
-    
-    req._body_cache = body
-    return req._body_cache->unwrap_ptr()
+File :: struct {
+    filename: str
+    name: str
+    mimetype: str
+    contents: str
 }
 
-#package
-request_parse_raw :: (req: &Request) -> str {
-    req.headers->get("transfer-encoding")->with([encoding] {
-        if encoding == "chunked" {
-            out := make([..] u8)
-
-            while true {
-                len := req.body_reader->read_u32()
-                req.body_reader->advance_line()
-
-                if len == 0 {
-                    req.body_reader->advance_line()
-                    break
-                }
-
-                out->ensure_capacity(out.length + len)
-                buf := out[out.length .. out.length + len]
-
-                index := 0
-                while index < len {
-                    read, err := req.body_reader->read_bytes(buf[index .. len])
-                    index += read
-                }
-
-                out.length += len
-            }
-
-            req._body_was_read = true
-            return out
-        }
-        
-        panic(tprintf("Unhandled transfer encoding: {}", encoding))
-    })
-
-    req.headers->get("content-length")->and_then(x => conv.parse(u32, x))->with([content_length] {
-        if content_length == 0 {
-            return ""
-        }
- 
-        content := make([] u8, content_length)
-        index := 0
-        while index < content_length {
-            read, err := req.body_reader->read_bytes(content[index .. content_length])
-            index += read
-        }
-
-        req._body_was_read = true
-        return content
-    })
-
-    return ""
-}
-
-#package
-request_parse_json :: (req: &Request) -> ? json.Json {
-    contents := request_parse_raw(req)
-
-    return json.decode_with_result(contents).Ok
-}
-
-#package
-request_parse_form_urlencoded :: (req: &Request) -> Map(str, [..] str) {
-    out := make(Map(str, [..] str))
-
-    content := request_parse_raw(req)
-    parse_url_encoded_key_value_multi(&out, &content)
-
-    return out
-}
-
-#package
-request_parse_multipart_form :: (req: &Request) -> ? Map(str, [..] str) {
-    out := make(Map(str, [..] str))
-
-    _, boundary_map := str.bisect(req.headers["content-type"] ?? "", '')
-    key, value      := str.bisect(boundary_map, '=')
-
-    str.strip_leading_whitespace(&key)
-    str.strip_leading_whitespace(&value)
-
-    if key != "boundary" {
-        return .None
-    }
-
-    boundary := value
-    if value[0] == '"' {
-        // Remove "" if they are present around boundary name
-        boundary = value[1 .. value.length - 1]
-    }
-
-    boundary_delimiter := core.tprintf("--{}", boundary)
-
-    content := request_parse_raw(req)
-    while content.length > 0 {
-        str.read_until(&content, '\n')
-        str.advance(&content, 1)
-
-        if content.length == 0 do break
-
-        part_name := ""
-        while !str.starts_with(content, "\r\n") {
-            key, value := parse_header(&content)
-
-            if key == "content-disposition" {
-                str.strip_leading_whitespace(&value)
-                if !str.starts_with(value, "form-data") do continue
-                str.advance(&value, "form-data".length)
-
-                str.strip_leading_whitespace(&value)
-                if !str.starts_with(value, "name=\"") do continue
-                str.advance(&value, "name=\"".length)
-
-                part_name = str.read_until(&value, '"')
-            }
-        }
-
-        part_value := str.read_until(&content, boundary_delimiter)
-                      |> str.strip_whitespace()
-
-        values := out->get_ptr_or_create(part_name)
-        values->push(part_value)
-    }
-
-    return out
-}
 

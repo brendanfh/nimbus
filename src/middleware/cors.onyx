@@ -3,34 +3,101 @@ package nimbus
 use core {tprintf}
 
 CORS :: struct {
-    allowed_origins: [] str
+    allow_origins: [] str
+    allow_headers: [] str
+    allow_methods: [] HTTP_Method
+    allow_credentials: bool
+
     max_age: u32
 }
 
 cors :: (origins: [] str, age := 86400) -> (c: CORS) {
-    c.allowed_origins = origins
+    c.allow_origins = origins
+    c.allow_methods = Array.make(HTTP_Method.[
+        .HEAD,
+        .GET,
+        .POST,
+        .PUT,
+        .DELETE,
+        .CONNECT,
+        .OPTIONS,
+        .TRACE,
+        .PATCH
+    ])
+    c.allow_headers = .[]
+    c.allow_credentials = false
+
     c.max_age = age
     return
 }
 
 #local
 cors_handler :: (c: &CORS, ctx: Context) {
-    origins := str.join(c.allowed_origins, ", ") if c.allowed_origins else "*"
+    origin := ctx->header("origin") ?? ""
+    ctx->set_header("Vary", "Origin")
 
-    ctx->set_header("Access-Control-Allow-Origin", origins)
-    ctx->set_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+    preflight := ctx->method() == .options
 
-    if ctx->method() == .OPTIONS {
-        ctx->header("access-control-request-headers")
-        |> Optional.value_or("")
-        |> ctx->set_header("Access-Control-Allow-Headers", _)
+    if origin == "" {
+        if !preflight {
+            ctx->next()
+            return
+        }
 
-        ctx->set_header("Access-Control-Max-Age", tprintf("{}", c.max_age))
         ctx->no_content(204)
+        return
+    }
+
+    allowOrigin := ""
+    for c.allow_origins {
+        if it == "*" || it == origin {
+            allowOrigin = it
+        }
+    }
+
+    if allowOrigin == "" {
+        if !preflight {
+            ctx->next()
+            return
+        }
+
+        ctx->no_content(204)
+        return
+    }
+
+    ctx->set_header("Access-Control-Allow-Origin", allowOrigin)
+    if c.allow_credentials {
+        ctx->set_header("Access-Control-Allow-Credentials", "true")
+    }
+
+    if !preflight {
+        ctx->next()
+        return
+    }
+
+    ctx->set_header("Vary", "Access-Control-Request-Method")
+    ctx->set_header("Vary", "Access-Control-Request-Headers")
+
+    ctx->set_header("Access-Control-Allow-Methods", 
+        c.allow_methods
+        |> Slice.map(x => tprintf("{}", x))
+        |> str.join(", ")
+    )
+
+    if c.allow_headers {
+        ctx->set_header("Access-Control-Allow-Headers",
+            c.allow_headers |> str.join(", ")
+        )
 
     } else {
-        ctx->next()
+        ctx->header("access-control-request-headers")->with(
+            [h](ctx->set_header("Access-Control-Allow-Headers", h))
+        )
     }
+
+    ctx->set_header("Access-Control-Max-Age", tprintf("{}", c.max_age))
+
+    ctx->no_content(204)
 }
 
 #overload

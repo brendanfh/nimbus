@@ -132,43 +132,27 @@ inner_handle_request :: (tcp: &TCP_Server, conn: &net.SocketAcceptResult) -> Inn
         return .DeadSocket
     }
 
-    session_gc := alloc.gc.make()
-    use_gc_allocator_in_current_scope(&session_gc)
-
-    // We have to copy the client's socket because the request handler
-    // has the ability to call TCP_Server.Client.detach which frees the
-    // client and releases control of the socket to the caller. This
-    // enables WebSockets and similar protocols. However, here we still
-    // need to respond to the request, so we must copy the socket to
-    // use it later.
-    client_addr := conn.addr
-    client_sock := conn.socket
-
+    // Prepare allocators for the request handling
+    alloc.gc.auto()
     alloc.clear_temp_allocator()
 
-    c := make_context(tcp.nimbus, &client_sock, context.allocator)
-    c.socket = client_sock
+    c := make_context(tcp.nimbus, &conn.socket, context.allocator)
+    c.socket = conn.socket
     defer destroy_context(&c)
 
     req := c.req
-    req.address = .{ client_addr->addr_as_str() }
+    req.address = conn.addr->addr_as_str()
 
-    use reader := io.reader_make(&client_sock)
+    use reader := io.reader_make(&conn.socket)
     if !parse_request(req, &reader) {
         return .BadRequest
     }
 
-    // Process the request!
+    // Process the request
     process_request(tcp.nimbus, ~~ &c)
 
-    // If the body was not read for some reason,
-    // we need to read it before we can read the next request.
-    // 
-    // This is not necessary if we close the connection right away
-    // if !req._body_was_read {
-    //     request_parse_raw(req)
-    // }
-
+    // When switching protocols, do not close the socket and it is likely now used by
+    // something else, like a websocket connection
     if c.res.status == 101 {
         return .SwitchedProtocols
     }
@@ -189,11 +173,9 @@ parse_request :: (req: &Request, r: &io.Reader) -> bool {
         |> Optional.transform(x => cast(HTTP_Method) x.value)
         |> Optional.value_or(.UNKNOWN)
 
-    route, request_line~ := str.bisect(request_line, ' ')
+    route, proto := str.bisect(request_line, ' ')
 
-    if str.starts_with(route, "http://") || str.starts_with(route, "https://") {
-        str.read_until(&route, "/", 2)
-    }
+    req.proto = proto
 
     query_params: _
     req.endpoint, query_params = str.bisect(route, '?')
@@ -202,33 +184,16 @@ parse_request :: (req: &Request, r: &io.Reader) -> bool {
 
     parse_url_encoded_key_value(&req.query, &query_params)
 
-    while true {
-        header, value := parse_header(r)
-        if header == "" do break
+    for header in Iterator.generator_no_copy(r, parse_header) {
+        if header.name == ci_str.{"cookie"} {
+            parse_cookies(header.value, &req.cookies)
 
-        if header == "cookie" {
-            // Parse cookies
-            parse_cookies(value, &req.cookies)
-            continue
+        } else {
+            add_header(&req.headers, header)
         }
-
-        req.headers[header] = value
     }
 
-    req.body_reader = r
+    req.body_stream = RequestInternal.make_body_stream(req, r)
     return true
-}
-
-
-
-#local
-use_gc_allocator_in_current_scope :: macro (gc: &alloc.gc.GCState) {
-    old_allocator := context.allocator
-    context.allocator = alloc.as_allocator(gc)
-
-    defer {
-        alloc.gc.clear(gc)
-        context.allocator = old_allocator
-    }
 }
 

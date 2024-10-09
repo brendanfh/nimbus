@@ -1,0 +1,46 @@
+package nimbus
+
+urlencode :: (s: str, allocator := context.allocator) -> str {
+    out := make([..] u8, s.count, allocator=allocator)
+
+    for ch in s {
+        //
+        // This list was taken from:
+        // https://developer.mozilla.org/en-US/docs/Glossary/percent-encoding
+        if ":/?#[]@!$&'()*+,\\<=>% \""->contains(ch) {
+            formatted: [3] u8
+
+            conv.format(formatted, "%{w2x16}", cast(u32) ch)
+                |> out->append()
+        } else {
+            out->append(ch)
+        }
+    }
+
+    return out
+}
+
+urldecode :: (s: str, allocator := context.allocator) -> str {
+    out := make(dyn_str, s.count, allocator=allocator)
+
+    i := Iterator.from(s)
+
+    for ch in i {
+        if ch == '%' {
+            a := Iterator.next(i) ?? 0
+            b := Iterator.next(i) ?? 0
+
+            n := u8.[a, b]
+
+            v := conv.parse_int(n, base=16)
+            out << ~~v
+
+        } elseif ch == '+' {
+            out << ' '
+        } else {
+            out << ch
+        }
+    }
+
+    return out
+}

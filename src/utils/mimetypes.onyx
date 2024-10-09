@@ -1,0 +1,41 @@
+package nimbus
+
+// Should this be a package wide thing? or should it live on the Nimbus structure?
+#package known_mimetypes: Map(str, str)
+
+#init () {
+    known_mimetypes->init()
+}
+
+guess_mime_type :: (filename: str) -> str {
+    extension := filename[str.last_index_of(filename, '.')+1 .. filename.count]
+
+    known_mimetypes->get(extension)->with([mimetype] {
+        return mimetype
+    })
+
+    //
+    // This is a small list of mime types that should be expanded
+    // on in the future. I don't know if it is worth pulling all
+    // of the known mime types from:
+    //
+    // https://www.iana.org/assignments/media-types/media-types.xhtml
+    //
+    // or if that is a little overkill.
+    switch extension {
+        case "html" do return "text/html"
+        case "css"  do return "text/css"
+        case "js"   do return "text/javascript"
+        case "xml"  do return "text/xml"
+
+        case "jpg", "jpeg"  do return "image/jpeg"
+        case "png"          do return "image/png"
+
+        case _ do return "application/text"
+    }
+}
+
+set_mime_type :: (ext: str, type: str) {
+    known_mimetypes->put(ext, type)
+}
+

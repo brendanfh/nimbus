@@ -26,24 +26,27 @@ make_request_from_env :: (stream: &io.Stream) -> Request {
     req.endpoint = env->get("PATH_TRANSLATED") ?? (env->get("PATH_INFO") ?? "")
     req._processed_endpoint = process_url_to_route_elems(req.endpoint, context.allocator)
 
-    req.address.ip = env["REMOTE_ADDR"] ?? ""
+    req.address = env["REMOTE_ADDR"]
 
     for Iterator.from(env) {
         if str.starts_with(it.key, "HTTP_") {
-            req.headers->put(str.advance(it.key, "HTTP_".count), it.value)
+            add_header(&req.headers, str.advance(it.key, 5), it.value)
         }
     }
 
-    req.headers["content-type"]   = env["HTTP_CONTENT_TYPE"] ?? ""
-    req.headers["user-agent"]     = env["HTTP_USER_AGENT"] ?? ""
-    req.headers["content-length"] = env["HTTP_CONTENT_LENGTH"] ?? ""
+    add_header(&req.headers, "content-type", env["HTTP_CONTENT_TYPE"] ?? "")
+    add_header(&req.headers, "user-agent", env["HTTP_USER_AGENT"] ?? "")
+    add_header(&req.headers, "content-length", env["HTTP_CONTENT_LENGTH"] ?? "")
 
     query_string := env["QUERY_STRING"] ?? ""
     parse_url_encoded_key_value(&req.query, &query_string)
     
     parse_cookies(env["HTTP_COOKIE"] ?? "", &req.cookies)
 
-    req.body_reader = new(io.reader_make(stream))
+    req.body_stream = RequestInternal.make_body_stream(
+        &req
+        new(io.Reader.make(stream))
+    )
 
     return req
 }

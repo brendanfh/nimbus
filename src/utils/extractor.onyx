@@ -1,0 +1,79 @@
+package nimbus
+
+use core.encoding.json
+use core.memory
+
+#package
+extract_value :: (c: Context, descriptors: str, out: rawptr, type: type_expr) -> bool {
+    for descriptor in str.split_iter(descriptors, ',') {
+        kind, identifier := str.bisect(descriptor, ':')
+
+        switch kind {
+            case "json" {
+                // TODO: Add support for JSON Path searches ($.foo[0].bar)
+                j := c->json_raw() ?? [] { continue }
+                json.as_any(j->get(identifier), type, out)
+                return true
+            }
+
+            case "header" {
+                value := c->header(identifier) ?? [] { continue }
+                extract_var(out, type, value)
+                return true
+            }
+
+            case "query" {
+                value := c->query(identifier) ?? [] { continue }
+                extract_var(out, type, value)
+                return true
+            }
+
+            case "cookie" {
+                value := c->cookie(identifier) ?? [] { continue }
+                extract_var(out, type, value)
+                return true
+            }
+
+            case "form" {
+                value := c->form_value(identifier) ?? [] { continue }
+                extract_var(out, type, value)
+                return true
+            }
+
+            case "param" {
+                value := c->param(identifier) ?? [] { continue }
+                extract_var(out, type, value)
+                return true
+            }
+
+            case "service" {
+                tinfo := type->info()
+                if tinfo.kind != .Pointer do continue
+
+                // First type `&T`
+                get_service_raw(c, type)->with([service_ptr] {
+                    *cast(&rawptr) out = service_ptr
+                    return true
+                })
+
+                // Then try `T`
+                service_type := tinfo->as_pointer().to
+                get_service_raw(c, service_type)->with([service_ptr] {
+                    *cast(&rawptr) out = service_ptr
+                    return true
+                })
+            }
+        }
+    }
+
+    return false
+
+    extract_var :: (dest: rawptr, type: type_expr, value: str) {
+        if type == str {
+            *cast(& str) dest = value
+        } else {
+            conv.parse_any(dest, type, value)
+        }
+    }
+}
+

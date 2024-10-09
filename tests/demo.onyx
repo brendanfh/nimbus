@@ -5,9 +5,26 @@ use core.encoding.json
 use core {tprintf}
 
 index :: c => {
+    logf(.Info, "Headers: {p}", c->request().headers)
     c->json(200, &.{
         foo = "test"
     })
+}
+
+@route.{.get, "/multipart"}
+(c: Context) {
+    c->html(200, #file_contents "./multipart.html")
+}
+
+@route.{.post, "/multipart"}
+(c: Context) {
+    files := c->form_files()
+    for file in files {
+        logf(.Info, "Filename: {}", file.filename)
+        logf(.Info, "Type: {}", file.mimetype)
+        logf(.Info, "Size: {}", file.contents.length)
+    }
+    c->no_content(204)
 }
 
 @route.{.get, "/other"}
@@ -122,6 +139,7 @@ main :: () {
     n->add(logger(style=.V2))
     n->add(static("/static", "./static"))
     n->add(not_found("text/plain", "Not found."))
+    // n->add(CSRF.{})
 
     n->add_tagged_routes()
     n->get("/", index)
@@ -136,5 +154,5 @@ main :: () {
     api := n->group("/api")
     api->add_tagged_routes(group = "api")
 
-    n->serve(8080, .{ thread_count = 16, max_clients = 128 })
+    n->serve(8080, .{ thread_count = 0, max_clients = 128 })
 }

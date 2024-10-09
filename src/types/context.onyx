@@ -73,7 +73,7 @@ destroy_context :: (c: &_context) {
     response_end(c.res, c.stream)
 
     response_free(c.res)
-    request_free(c.req)
+    RequestInternal.free(c.req)
 }
 
 
@@ -104,7 +104,7 @@ Context.method :: (self: Context) -> HTTP_Method {
 /// Returns the value of a provided header, if present.
 Context.header :: (self: Context, header: str) -> ? str {
     c := cast(&_context) self
-    return c.req.headers[header]
+    return get_header(&c.req.headers, header)
 }
 
 /// Returns the value of a query parameter, if present.
@@ -192,19 +192,31 @@ Context.form_value :: (self: Context, key: str, $Form_Type: type_expr) -> ? Form
 #overload
 Context.form_value :: (self: Context, key: str) -> ? str {
     c := cast(&_context) self
-    body := request_get_body(c.req)
+    body := RequestInternal.get_body(c.req)
 
     form := body.Form?
-    return form[key]?[0]
+    return form.values[key]?[0]
 }
 
 /// Returns all values given for a form parameter.
 Context.form_values :: (self: Context, key: str) -> [] str {
     c := cast(&_context) self
-    body := request_get_body(c.req)
+    body := RequestInternal.get_body(c.req)
 
     body.Form->with([form] {
-        return form[key]?
+        return form.values[key]?
+    })
+
+    return .[]
+}
+
+/// Returns all files uploaded for this request.
+Context.form_files :: (self: Context) -> [] File {
+    c := cast(&_context) self
+    body := RequestInternal.get_body(c.req)
+
+    body.Form->with([form] {
+        return form.files
     })
 
     return .[]
@@ -213,7 +225,7 @@ Context.form_values :: (self: Context, key: str) -> [] str {
 /// Returns a `json.Value` of the body of the request, if the body is present and is JSON.
 Context.json_raw :: (self: Context) -> ? json.Value {
     c := cast(&_context) self
-    body := request_get_body(c.req)
+    body := RequestInternal.get_body(c.req)
     return body.Json?.root
 }
 
@@ -221,6 +233,15 @@ Context.json_raw :: (self: Context) -> ? json.Value {
 Context.json_as :: (self: Context, $T: type_expr) -> ? T {
     val := self->json_raw()?
     return json.as_any(val, T)
+}
+
+
+/// Returns the entire body a string. Rarely useful directly.
+Context.raw_body :: (self: Context) -> str {
+    c := cast(&_context) self
+    body := RequestInternal.parse_raw(c.req)
+    c.req._body_cache = Request_Body.{ Raw = body }
+    return body
 }
 
 
@@ -319,65 +340,8 @@ Context.bind :: (self: Context, out: any) {
         if !lookup_opt do continue
 
         lookup := lookup_opt!
-        kind, identifier := str.bisect(lookup, ':')
 
-        switch kind {
-            case "json" {
-                // TODO: Add support for JSON Path searches ($.foo[0].bar)
-                j := self->json_raw() ?? [] { continue }
-                json.as_any(j->get(identifier), member.type, memory.ptr_add(dest, member.offset))
-            }
-
-            case "header" {
-                value := self->header(identifier) ?? [] { continue }
-                extract_var(memory.ptr_add(dest, member.offset), member.type, value)
-            }
-
-            case "query" {
-                value := self->query(identifier) ?? [] { continue }
-                extract_var(memory.ptr_add(dest, member.offset), member.type, value)
-            }
-
-            case "cookie" {
-                value := self->cookie(identifier) ?? [] { continue }
-                extract_var(memory.ptr_add(dest, member.offset), member.type, value)
-            }
-
-            case "form" {
-                value := self->form_value(identifier) ?? [] { continue }
-                extract_var(memory.ptr_add(dest, member.offset), member.type, value)
-            }
-
-            case "param" {
-                value := self->param(identifier) ?? [] { continue }
-                extract_var(memory.ptr_add(dest, member.offset), member.type, value)
-            }
-
-            case "service" {
-                tinfo := member.type->info()
-                if tinfo.kind != .Pointer do continue
-
-                // First type `&T`
-                get_service_raw(self, member.type)->with([service_ptr] {
-                    *cast(&rawptr) memory.ptr_add(dest, member.offset) = service_ptr
-                    continue
-                })
-
-                // Then try `T`
-                service_type := tinfo->as_pointer().to
-                get_service_raw(self, service_type)->with([service_ptr] {
-                    *cast(&rawptr) memory.ptr_add(dest, member.offset) = service_ptr
-                })
-            }
-        }
-    }
-
-    extract_var :: (dest: rawptr, type: type_expr, value: str) {
-        if type == str {
-            *cast(& str) dest = value
-        } else {
-            conv.parse_any(dest, type, value)
-        }
+        extract_value(self, lookup, memory.ptr_add(dest, member.offset), member.type)
     }
 }
 
@@ -396,10 +360,13 @@ Context._response :: (self: Context) -> &Response {
 /// Sets the value of a header for the response.
 Context.set_header :: (self: Context, header: str, value: str) {
     c := cast(&_context) self
-    c.res.headers->put(header, value)
+    c.res.headers->push(.{header, value})
 }
 
 /// Sets the value of a cookie for the response.
+Context.set_cookie :: #match #local {}
+
+#overload
 Context.set_cookie :: (
     self: Context,
     name: str,
@@ -407,13 +374,18 @@ Context.set_cookie :: (
     expires: ? time.Timestamp = .None,
     path: str = "/"
 ) {
-    c := cast(&_context) self
-
-    c.res.cookies->put(name, Cookie.{
+    self->set_cookie(Cookie.{
+        name = name,
         value = value,
         expires = expires,
         path = path
     })
+}
+
+#overload
+Context.set_cookie :: (self: Context, cookie: Cookie) {
+    c := cast(&_context) self
+    c.res.cookies->push(cookie)
 }
 
 /// Writes just the headers of the response.
@@ -442,7 +414,7 @@ Context.redirect :: (self: Context, code: u32, uri: str) {
     }
 
     c.res.status = code
-    c.res.headers["Location"] = uri
+    c.res.headers->push(.{"Location", uri})
     response_write_headers(c.res, c.stream)
     response_flush_body(c.res, c.stream)
 }
@@ -452,7 +424,7 @@ Context.blob :: (self: Context, code: u32, mimetype: str, content: [] u8) {
     c := cast(&_context) self
 
     c.res.status = code
-    c.res.headers["Content-Type"] = mimetype
+    c.res.headers->push(.{"Content-Type", mimetype})
 
     c.res.writer->write(content)
 
@@ -468,7 +440,7 @@ Context.json :: (self: Context, code: u32, data: any) {
     json.encode(&c.res.writer, misc.any_dereference(data))
 
     c.res.status = code
-    c.res.headers["Content-Type"] = "application/json"
+    c.res.headers->push(.{"Content-Type", "application/json"})
 
     response_write_headers(c.res, c.stream)
     response_flush_body(c.res, c.stream)
