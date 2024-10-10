@@ -210,6 +210,15 @@ Context.form_values :: (self: Context, key: str) -> [] str {
     return .[]
 }
 
+/// Returns a `File` with the specified parameter name, if it was sent in the request.
+Context.form_file :: (self: Context, name: str) -> ? File {
+    c := cast(&_context) self
+    body := RequestInternal.get_body(c.req)
+
+    form := body.Form?
+    return Slice.find_opt(form.files, [x](x.name == name))
+}
+
 /// Returns all files uploaded for this request.
 Context.form_files :: (self: Context) -> [] File {
     c := cast(&_context) self
@@ -242,6 +251,18 @@ Context.raw_body :: (self: Context) -> str {
     body := RequestInternal.parse_raw(c.req)
     c.req._body_cache = Request_Body.{ Raw = body }
     return body
+}
+
+/// Returns a stream of the body contents.
+/// This stream has been preprocessed to remove chunked encoding and compression.
+Context.raw_stream :: (self: Context) -> ? &io.Stream {
+    c := cast(&_context) self
+    if c.req._body_cache {
+        return c.req._body_cache!.Stream
+    }
+
+    c.req._body_cache = Request_Body.{ Stream = &c.req.body_stream }
+    return &c.req.body_stream
 }
 
 

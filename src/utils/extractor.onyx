@@ -40,6 +40,13 @@ extract_value :: (c: Context, descriptors: str, out: rawptr, type: type_expr) ->
                 return true
             }
 
+            case "file" {
+                if type != File do break
+                file := c->form_file(identifier) ?? [] { continue }
+                *cast(& File) out = file
+                return true
+            }
+
             case "param" {
                 value := c->param(identifier) ?? [] { continue }
                 extract_var(out, type, value)
