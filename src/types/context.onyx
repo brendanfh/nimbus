@@ -297,7 +297,7 @@ get_service_raw :: (self: Context, T: type_expr) -> ? rawptr {
             existing := c.scoped_service_instances[T]
             if existing do return existing
 
-            new_value := service.create(context.allocator)
+            new_value := service.create(context.allocator, self)
             c.scoped_service_instances[T] = new_value
             return new_value
         }
@@ -309,7 +309,7 @@ get_service_raw :: (self: Context, T: type_expr) -> ? rawptr {
                 existing := threaded_services[T]
                 if existing do return existing
 
-                new_value := creator(context.allocator)
+                new_value := creator(context.allocator, self)
 
                 threaded_services[T] = new_value
                 return new_value
