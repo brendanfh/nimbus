@@ -148,7 +148,7 @@ Nimbus.service_singleton :: (self: &Nimbus, value: $T) {
 Nimbus.service_scoped :: (self: &Nimbus, creator: (Context) -> $T, destructor: (&T) -> void = null_proc) {
     moved_creator := alloc.copy_closure(creator, self.allocator)
 
-    provider: (Allocator, Context) -> rawptr = (allocator, context, [moved_creator]) => {
+    provider: (Allocator, Context) -> rawptr = (allocator, c, [moved_creator]) => {
         // This `new` is allocating on the `context.allocator`, which is
         // assumed to be the GC allocator setup by the TCP server.
         return new(moved_creator(c), allocator)
