@@ -162,7 +162,6 @@ RequestInternal.parse_multipart_form :: (req: &Request) -> ? FormData {
 
         content := make(dyn_str)
 
-        previous_matched := 0
         while true {
             if body_reader->ensure_buffered(boundary.length) != .None {
                 logf(.Debug, "encountered poorly formatted multipart/form-data. terminating early")
@@ -171,10 +170,10 @@ RequestInternal.parse_multipart_form :: (req: &Request) -> ? FormData {
 
             start, matched := partial_match(
                 body_reader.buffer[body_reader.start .. body_reader.end]
-                boundary[previous_matched .. boundary.length]
+                boundary
             )
 
-            if previous_matched + matched == boundary.count {
+            if matched == boundary.count {
                 if start > 0 {
                     content->ensure_capacity(content.length + start)
                     body_reader->read_bytes(content[content.length .. content.length + start])
@@ -183,9 +182,7 @@ RequestInternal.parse_multipart_form :: (req: &Request) -> ? FormData {
                 break
             }
 
-            previous_matched = matched
-
-            to_read := body_reader->get_buffered()
+            to_read := body_reader->get_buffered() - matched
             content->ensure_capacity(content.length + to_read)
             body_reader->read_bytes(content[content.length .. content.length + to_read])
             content.length += to_read
@@ -310,5 +307,9 @@ body_stream_vtable := io.Stream_Vtable.{
                 return .{ Ok = to_read }
             }
         }
+    }
+
+    poll = (s: &Body_Stream, ev: io.PollEvent, timeout: i32) -> Result(bool, io.Error) {
+        return io.stream_poll(s.in_reader.stream, ev, timeout)
     }
 }
