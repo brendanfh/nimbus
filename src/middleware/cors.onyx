@@ -101,5 +101,5 @@ cors_handler :: (c: &CORS, ctx: Context) {
 }
 
 #overload
-ToMiddleware.convert :: macro (c: &CORS) => Middleware.{ cors_handler, c }
+ToMiddleware.convert :: (c: &CORS) => Middleware.{ cors_handler, c }
 

@@ -16,7 +16,7 @@ CSRF :: struct {
 }
 
 #overload
-ToMiddleware.convert :: macro (c: &CSRF) => Middleware.{ csrf_handler, c }
+ToMiddleware.convert :: (c: &CSRF) => Middleware.{ csrf_handler, c }
 
 #local
 csrf_handler :: (self: &CSRF, c: Context) {

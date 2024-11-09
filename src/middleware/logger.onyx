@@ -87,4 +87,4 @@ logger_log_request :: (l: &Logger, c: Context) {
 }
 
 #overload
-ToMiddleware.convert :: macro (l: &Logger) => Middleware.{ logger_log_request, l }
+ToMiddleware.convert :: (l: &Logger) => Middleware.{ logger_log_request, l }

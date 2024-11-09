@@ -37,4 +37,4 @@ static_file_router_handle :: (sf: &Static_File_Router, c: Context) {
 }
 
 #overload
-ToMiddleware.convert :: macro (sf: &Static_File_Router) => Middleware.{ static_file_router_handle, sf }
+ToMiddleware.convert :: (sf: &Static_File_Router) => Middleware.{ static_file_router_handle, sf }

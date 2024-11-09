@@ -284,7 +284,7 @@ Context.service :: (self: Context, $T: type_expr) -> ? &T {
 #local
 #thread_local threaded_services: Map(type_expr, rawptr)
 
-#local
+#package
 get_service_raw :: (self: Context, T: type_expr) -> ? rawptr {
     c := cast(&_context) self
     def := c.nimbus._services[T]?

@@ -23,5 +23,5 @@ not_found_handler :: (nf: &NotFound, ctx: Context) {
 }
 
 #overload
-ToMiddleware.convert :: macro (nf: &NotFound) => Middleware.{ not_found_handler, nf }
+ToMiddleware.convert :: (nf: &NotFound) => Middleware.{ not_found_handler, nf }
 

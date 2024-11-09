@@ -11,7 +11,7 @@ TCP_Server :: struct {
 
     thread_pool: [] thread.Thread
 
-    ready_sockets: sync.Channel(& net.SocketAcceptResult)
+    ready_sockets: sync.Channel(net.SocketAcceptResult)
 }
 
 TCP_Settings :: struct {
@@ -33,7 +33,7 @@ tcp_server_make :: (nimbus: &Nimbus, settings: TCP_Settings) -> &TCP_Server {
         thread_pool = threads,
         listen_socket = listen_socket
         listen_address = settings.address
-        ready_sockets = sync.Channel.make(& net.SocketAcceptResult)
+        ready_sockets = sync.Channel.make(net.SocketAcceptResult)
     }, nimbus.allocator)
 
     for& t in threads {
@@ -75,8 +75,7 @@ TCP_Server.serve :: (tcp: &TCP_Server, port: u32, addr := "0.0.0.0") -> Serve_St
                 handle_request(tcp, &conn)
 
             } else {
-                conn_on_heap := new(conn)
-                tcp.ready_sockets->send(conn_on_heap)
+                tcp.ready_sockets->send(conn)
             }
         })
     }
@@ -98,8 +97,7 @@ make_sure_all_threads_are_alive :: (tcp: &TCP_Server) {
 tcp_server_thread :: (tcp: &TCP_Server) {
     while true {
         conn := tcp.ready_sockets->recv()?
-        handle_request(tcp, conn)
-        context.allocator->free(conn)
+        handle_request(tcp, &conn)
     }
 }
 
