@@ -583,7 +583,7 @@ push_context :: macro () {
     defer context = c
 }
 
-#local
+#package
 any_copy :: (x: any, allocator: Allocator) -> any {
     use runtime.info
     use core.memory
