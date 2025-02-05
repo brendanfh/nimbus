@@ -28,6 +28,7 @@ add_header :: #match #local {
         l := headers->get_ptr_or_create(ci_str.{h})
 
         if l.capacity == 0 {
+            l.allocator = context.allocator
             l->ensure_capacity(1)
         }
 
@@ -38,6 +39,7 @@ add_header :: #match #local {
         l := headers->get_ptr_or_create(h.name)
 
         if l.capacity == 0 {
+            l.allocator = context.allocator
             l->ensure_capacity(1)
         }
 
