@@ -37,9 +37,9 @@ cookie_write :: (c: &Cookie, w: &io.Writer) {
         io.write_format(w, "; Domain={}", c.domain)
     }
 
-    c.expires->with([e] {
+    if c.expires as e {
         io.write_format(w, "; Expires={}", e->format("%a, %d %b %Y %H:%M:%S GMT"))
-    })
+    }
 
     if c.max_age > 0 {
         io.write_format(w, "; Max-Age={}", c.max_age)

@@ -89,10 +89,8 @@ cors_handler :: (c: &CORS, ctx: Context) {
             c.allow_headers |> str.join(", ")
         )
 
-    } else {
-        ctx->header("access-control-request-headers")->with(
-            [h](ctx->set_header("Access-Control-Allow-Headers", h))
-        )
+    } elseif ctx->header("access-control-request-headers") as h {
+        ctx->set_header("Access-Control-Allow-Headers", h)
     }
 
     ctx->set_header("Access-Control-Max-Age", tprintf("{}", c.max_age))

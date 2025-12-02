@@ -1,4 +1,4 @@
-#load "./../module"
+#load "../module"
 
 use nimbus {*}
 use core.encoding.json
@@ -154,5 +154,5 @@ main :: () {
     api := n->group("/api")
     api->add_tagged_routes(group = "api")
 
-    n->serve(8080, .{ thread_count = 0, max_clients = 128 })
+    n->serve(8080, .{ thread_count = 8, max_clients = 128 })
 }

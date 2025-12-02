@@ -116,10 +116,10 @@ Context.query :: #match #local {}
 Context.query :: (self: Context, param: str, $Query_Type: type_expr) -> ? Query_Type {
     c := cast(&_context) self
 
-    value := c.req.query[param]
-    value->with([v] {
+    if c.req.query[param] as v {
         return conv.parse_with_allocator(Query_Type, v, c.allocator)
-    })
+    }
+
     return .None
 }
 
@@ -154,10 +154,10 @@ Context.param :: #match #local {}
 Context.param :: (self: Context, param: str, $Param_Type: type_expr) -> ? Param_Type {
     c := cast(&_context) self
 
-    value := c.req.params[param]
-    value->with([v] {
+    if c.req.params[param] as v {
         return conv.parse_with_allocator(Param_Type, v, c.allocator)
-    })
+    }
+
     return .None
 }
 
@@ -203,9 +203,9 @@ Context.form_values :: (self: Context, key: str) -> [] str {
     c := cast(&_context) self
     body := RequestInternal.get_body(c.req)
 
-    body.Form->with([form] {
+    if body.Form as form {
         return form.values[key]?
-    })
+    }
 
     return .[]
 }
@@ -224,9 +224,9 @@ Context.form_files :: (self: Context) -> [] File {
     c := cast(&_context) self
     body := RequestInternal.get_body(c.req)
 
-    body.Form->with([form] {
+    if body.Form as form {
         return form.files
-    })
+    }
 
     return .[]
 }

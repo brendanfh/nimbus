@@ -70,14 +70,14 @@ TCP_Server.serve :: (tcp: &TCP_Server, port: u32, addr := "0.0.0.0") -> Serve_St
     while true {
         make_sure_all_threads_are_alive(tcp)
 
-        tcp.listen_socket->accept().Ok->with([conn] {
+        if tcp.listen_socket->accept().Ok as conn {
             if !tcp.thread_pool {
                 handle_request(tcp, &conn)
 
             } else {
                 tcp.ready_sockets->send(conn)
             }
-        })
+        }
     }
 
     return .Success
