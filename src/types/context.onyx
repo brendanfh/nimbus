@@ -358,11 +358,9 @@ Context.bind :: (self: Context, out: any) {
             |> Slice.find_opt([x](x.type == str))
             |> Optional.transform(x => *misc.any_as(x, str))
 
-        if !lookup_opt do continue
-
-        lookup := lookup_opt!
-
-        extract_value(self, lookup, memory.ptr_add(dest, member.offset), member.type)
+        if lookup_opt as lookup {
+            extract_value(self, lookup, memory.ptr_add(dest, member.offset), member.type)
+        }
     }
 }
 

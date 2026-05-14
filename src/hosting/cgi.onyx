@@ -28,9 +28,9 @@ make_request_from_env :: (stream: &io.Stream) -> Request {
 
     req.address = env["REMOTE_ADDR"]
 
-    for Iterator.from(env) {
-        if str.starts_with(it.key, "HTTP_") {
-            add_header(&req.headers, str.advance(it.key, 5), it.value)
+    for key, value in env {
+        if str.starts_with(key, "HTTP_") {
+            add_header(&req.headers, str.advance(key, 5), value)
         }
     }
 
