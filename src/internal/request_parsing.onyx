@@ -75,7 +75,7 @@ RequestInternal.parse_raw :: (req: &Request) -> str {
 RequestInternal.parse_json :: (req: &Request) -> ? json.Json {
     contents := RequestInternal.parse_raw(req)
 
-    return json.decode_with_result(contents).Ok
+    return json.decode(contents).Ok
 }
 
 RequestInternal.parse_form_urlencoded :: (req: &Request) -> Map(str, [..] str) {
@@ -310,6 +310,6 @@ body_stream_vtable := io.Stream_Vtable.{
     }
 
     poll = (s: &Body_Stream, ev: io.PollEvent, timeout: i32) -> Result(bool, io.Error) {
-        return io.stream_poll(s.in_reader.stream, ev, timeout)
+        return io.Stream.poll(s.in_reader.stream, ev, timeout)
     }
 }

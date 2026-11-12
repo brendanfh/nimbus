@@ -1,7 +1,7 @@
 package nimbus
 
 use core.time
-use core.io
+use core.io {Writer}
 
 Cookie :: struct {
     name: str
@@ -24,40 +24,40 @@ Cookie :: struct {
 
 #package
 cookie_write :: (c: &Cookie, w: &io.Writer) {
-    io.write(w, c.name)
-    io.write(w, "=")
-    io.write(w, c.value)
+    Writer.write(w, c.name)
+    Writer.write(w, "=")
+    Writer.write(w, c.value)
 
     if c.path {
-        io.write_format(w, "; Path={}", c.path)
+        Writer.write_format(w, "; Path={}", c.path)
     }
 
     if c.domain {
         // Robustness: check for invalid cookie domain.
-        io.write_format(w, "; Domain={}", c.domain)
+        Writer.write_format(w, "; Domain={}", c.domain)
     }
 
-    c.expires->with([e] {
-        io.write_format(w, "; Expires={}", e->format("%a, %d %b %Y %H:%M:%S GMT"))
-    })
+    if c.expires as e {
+        Writer.write_format(w, "; Expires={}", e->format("%a, %d %b %Y %H:%M:%S GMT"))
+    }
 
     if c.max_age > 0 {
-        io.write_format(w, "; Max-Age={}", c.max_age)
+        Writer.write_format(w, "; Max-Age={}", c.max_age)
     } elseif c.max_age < 0 {
-        io.write(w, "; Max-Age=0")
+        Writer.write(w, "; Max-Age=0")
     }
     
     if c.http_only {
-        io.write(w, "; HttpOnly")
+        Writer.write(w, "; HttpOnly")
     }
 
     if c.secure {
-        io.write(w, "; Secure")
+        Writer.write(w, "; Secure")
     }
 
     switch c.same_site {
         case .Default ---
-        case _ do io.write_format(w, "; SameSite={}", c.same_site)
+        case _ do Writer.write_format(w, "; SameSite={}", c.same_site)
     }
 
     // Note: Not supporting partitioned cookies

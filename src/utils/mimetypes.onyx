@@ -10,9 +10,9 @@ package nimbus
 guess_mime_type :: (filename: str) -> str {
     extension := filename[str.last_index_of(filename, '.')+1 .. filename.count]
 
-    known_mimetypes->get(extension)->with([mimetype] {
+    if known_mimetypes->get(extension) as mimetype {
         return mimetype
-    })
+    }
 
     //
     // This is a small list of mime types that should be expanded

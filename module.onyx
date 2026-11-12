@@ -23,9 +23,9 @@ use runtime
 }
 
 
-#load_all "./src"
-#load_all "./src/types"
-#load_all "./src/middleware"
-#load_all "./src/internal"
-#load_all "./src/utils"
+#load "./src"
+#load "./src/types"
+#load "./src/middleware"
+#load "./src/internal"
+#load "./src/utils"
 #load "./src/hosting/cgi"

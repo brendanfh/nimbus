@@ -20,7 +20,7 @@ LoggerStyle :: enum {
 
 logger :: (s: &io.Stream = &core.stdio.stream, style := LoggerStyle.V1) -> Logger {
     return .{
-        io.writer_make(s),
+        io.Writer.make(s),
         style
     }
 }
@@ -36,7 +36,7 @@ logger_log_request :: (l: &Logger, c: Context) {
 
     switch l.style {
         case .V1 do 
-            io.write_format(
+            io.Writer.write_format(
                 &l.writer,
                 "[{}] {} {} {}{} - {}\n",
                 context.thread_id,
@@ -55,7 +55,7 @@ logger_log_request :: (l: &Logger, c: Context) {
                 status_color = "91"
             }
 
-            io.write_format(
+            io.Writer.write_format(
                 &l.writer,
                 "{} \e[1;96m{} \e[1;{}m{}\e[0m \e[1;94m{} {}{} \e[90m{}\e[0m\n",
                 time.gmtime(start_time / 1000)->format()
@@ -82,8 +82,8 @@ logger_log_request :: (l: &Logger, c: Context) {
         }
     }
 
-    io.writer_flush(&l.writer)
-    io.stream_flush(l.writer.stream)
+    io.Writer.flush(&l.writer)
+    io.Stream.flush(l.writer.stream)
 }
 
 #overload

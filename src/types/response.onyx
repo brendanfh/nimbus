@@ -16,7 +16,7 @@ Response :: struct {
 
 #package {
     response_init :: (res: &Response) {
-        res.writer, res.output = io.string_builder()
+        res.writer, res.output = io.Writer.string_builder()
     }
 
     response_free :: (res: &Response) {
@@ -66,45 +66,45 @@ Response :: struct {
 
         response_prepare_for_write(res)
 
-        w := io.writer_make(s, 0)
+        w := io.Writer.make(s, 0)
 
-        io.write_format(&w, "HTTP/1.1 {} {}\r\n",
+        io.Writer.write_format(&w, "HTTP/1.1 {} {}\r\n",
             res.status,
             status_code_to_message(res.status))
 
         for& res.headers {
-            io.write_format(&w, "{}: {}\r\n", it.first, it.second)
+            io.Writer.write_format(&w, "{}: {}\r\n", it.first, it.second)
         }
 
         for& res.cookies {
-            io.write(&w, "Set-Cookie: ")
+            io.Writer.write(&w, "Set-Cookie: ")
             cookie_write(it, &w)
-            io.write(&w, "\r\n")
+            io.Writer.write(&w, "\r\n")
         }
 
-        io.write(&w, "\r\n")
+        io.Writer.write(&w, "\r\n")
 
         res.commited = true
     }
 
     response_flush_body :: (res: &Response, s: &io.Stream) {
         contents := str.as_str(res.output)
-        defer io.stream_flush(res.output)
+        defer io.Stream.flush(res.output)
 
         // This is not what chunked is for...
         if res.chunked {
-            io.stream_write(s, core.tprintf("{b16}\r\n", contents.length))
-            io.stream_write(s, contents)
-            io.stream_write(s, "\r\n")
+            io.Stream.write(s, core.tprintf("{b16}\r\n", contents.length))
+            io.Stream.write(s, contents)
+            io.Stream.write(s, "\r\n")
 
         } else {
-            io.stream_write(s, contents)
+            io.Stream.write(s, contents)
         }
     }
 
     response_end :: (res: &Response, s: &io.Stream) {
         if res.chunked {
-            io.stream_write(s, "0\r\n\r\n")
+            io.Stream.write(s, "0\r\n\r\n")
         }
     }
 }

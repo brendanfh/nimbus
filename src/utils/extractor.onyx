@@ -58,17 +58,17 @@ extract_value :: (c: Context, descriptors: str, out: rawptr, type: type_expr) ->
                 if tinfo.kind != .Pointer do continue
 
                 // First type `&T`
-                get_service_raw(c, type)->with([service_ptr] {
+                if get_service_raw(c, type) as service_ptr {
                     *cast(&rawptr) out = service_ptr
                     return true
-                })
+                }
 
                 // Then try `T`
                 service_type := tinfo->as_pointer().to
-                get_service_raw(c, service_type)->with([service_ptr] {
+                if get_service_raw(c, service_type) as service_ptr {
                     *cast(&rawptr) out = service_ptr
                     return true
-                })
+                }
             }
         }
     }

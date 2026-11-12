@@ -70,14 +70,14 @@ TCP_Server.serve :: (tcp: &TCP_Server, port: u32, addr := "0.0.0.0") -> Serve_St
     while true {
         make_sure_all_threads_are_alive(tcp)
 
-        tcp.listen_socket->accept().Ok->with([conn] {
+        if tcp.listen_socket->accept().Ok as conn {
             if !tcp.thread_pool {
                 handle_request(tcp, &conn)
 
             } else {
                 tcp.ready_sockets->send(conn)
             }
-        })
+        }
     }
 
     return .Success
@@ -108,7 +108,7 @@ handle_request :: (tcp: &TCP_Server, conn: &net.SocketAcceptResult) {
         case .Ok do net.socket_close(&conn.socket)
         case .DeadSocket, .SwitchedProtocols do return
         case .BadRequest {
-            io.stream_write(&conn.socket, "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n")
+            io.Stream.write(&conn.socket, "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n")
             net.socket_close(&conn.socket)
         }
     }
@@ -141,7 +141,7 @@ inner_handle_request :: (tcp: &TCP_Server, conn: &net.SocketAcceptResult) -> Inn
     req := c.req
     req.address = conn.addr->addr_as_str()
 
-    use reader := io.reader_make(&conn.socket)
+    use reader := io.Reader.make(&conn.socket)
     if !parse_request(req, &reader) {
         return .BadRequest
     }
